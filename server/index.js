@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
@@ -14,6 +15,8 @@ const io = new Server(httpServer, {
 const rooms = new Map();
 
 const rollDie = () => Math.floor(Math.random() * 6) + 1;
+
+const makePlayerToken = () => crypto.randomUUID();
 
 const makeRoomId = () => {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -46,16 +49,20 @@ const toPublicRoom = (room) => ({
   lastRoll: room.lastRoll ?? null,
   lastRollPlayerId: room.lastRollPlayerId ?? null,
   lastEvent: room.lastEvent ?? "",
+  rollHistory: room.rollHistory ?? [],
 });
 
 const emitRoom = (room) => {
   io.to(room.id).emit("room:state", toPublicRoom(room));
 };
 
+const isActivePlayer = (player) =>
+  player.connected && player.eligible && !player.banked;
+
 const firstEligibleUnbankedIndex = (room) => {
   for (let i = 0; i < room.players.length; i += 1) {
     const player = room.players[i];
-    if (player.eligible && !player.banked) {
+    if (isActivePlayer(player)) {
       return i;
     }
   }
@@ -63,7 +70,15 @@ const firstEligibleUnbankedIndex = (room) => {
 };
 
 const hasEligibleUnbanked = (room) =>
-  room.players.some((player) => player.eligible && !player.banked);
+  room.players.some((player) => isActivePlayer(player));
+
+const pushRollHistory = (room, entry) => {
+  room.rollHistory.unshift({
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    ...entry,
+  });
+  room.rollHistory = room.rollHistory.slice(0, 12);
+};
 
 const startRound = (room, roundNumber) => {
   room.currentRound = roundNumber;
@@ -155,6 +170,7 @@ const createRoom = ({ hostId, hostName, totalRounds }) => {
     id = makeRoomId();
   }
 
+  const hostToken = makePlayerToken();
   const room = {
     id,
     hostId,
@@ -166,6 +182,7 @@ const createRoom = ({ hostId, hostName, totalRounds }) => {
         banked: false,
         eligible: true,
         connected: true,
+        token: hostToken,
       },
     ],
     started: false,
@@ -179,6 +196,7 @@ const createRoom = ({ hostId, hostName, totalRounds }) => {
     lastRoll: null,
     lastRollPlayerId: null,
     lastEvent: "Room created.",
+    rollHistory: [],
   };
 
   rooms.set(id, room);
@@ -186,7 +204,7 @@ const createRoom = ({ hostId, hostName, totalRounds }) => {
 };
 
 io.on("connection", (socket) => {
-  socket.on("room:create", ({ name, totalRounds }) => {
+  socket.on("room:create", ({ name, totalRounds, token }) => {
     if (!name) {
       socket.emit("room:error", "Name is required.");
       return;
@@ -198,12 +216,51 @@ io.on("connection", (socket) => {
       totalRounds: Number(totalRounds) || 10,
     });
 
+    const host = room.players.find((player) => player.id === socket.id);
+    if (host) {
+      host.token = token || host.token || makePlayerToken();
+    }
+
     socket.data.roomId = room.id;
     socket.join(room.id);
     emitRoom(room);
   });
 
-  socket.on("room:join", ({ roomId, name }) => {
+  socket.on("room:reconnect", ({ roomId, name, token }) => {
+    const room = rooms.get(roomId);
+    if (!room) {
+      socket.emit("room:error", "Room not found.");
+      return;
+    }
+
+    if (!token) {
+      socket.emit("room:error", "Missing reconnect token.");
+      return;
+    }
+
+    const existingPlayer = room.players.find((player) => player.token === token);
+    if (!existingPlayer) {
+      socket.emit("room:error", "Reconnect failed.");
+      return;
+    }
+
+    if (room.hostId === existingPlayer.id) {
+      room.hostId = socket.id;
+    }
+
+    existingPlayer.id = socket.id;
+    existingPlayer.name = name || existingPlayer.name;
+    existingPlayer.connected = true;
+
+    socket.data.roomId = room.id;
+    socket.join(room.id);
+
+    room.lastEvent = `${existingPlayer.name} reconnected.`;
+    ensureValidTurn(room);
+    emitRoom(room);
+  });
+
+  socket.on("room:join", ({ roomId, name, token }) => {
     const room = rooms.get(roomId);
     if (!room) {
       socket.emit("room:error", "Room not found.");
@@ -215,6 +272,26 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (token) {
+      const existingPlayer = room.players.find(
+        (player) => player.token === token
+      );
+      if (existingPlayer) {
+        if (room.hostId === existingPlayer.id) {
+          room.hostId = socket.id;
+        }
+        existingPlayer.id = socket.id;
+        existingPlayer.name = name || existingPlayer.name;
+        existingPlayer.connected = true;
+        socket.data.roomId = room.id;
+        socket.join(room.id);
+        room.lastEvent = `${existingPlayer.name} reconnected.`;
+        ensureValidTurn(room);
+        emitRoom(room);
+        return;
+      }
+    }
+
     const player = {
       id: socket.id,
       name,
@@ -222,6 +299,7 @@ io.on("connection", (socket) => {
       banked: room.started && !room.finished,
       eligible: !(room.started && !room.finished),
       connected: true,
+      token: token || makePlayerToken(),
     };
 
     room.players.push(player);
@@ -238,30 +316,48 @@ io.on("connection", (socket) => {
     emitRoom(room);
   });
 
-  socket.on("room:setRounds", ({ totalRounds }) => {
-    const room = rooms.get(socket.data.roomId);
+  socket.on("room:leave", () => {
+    const roomId = socket.data.roomId;
+    if (!roomId) {
+      return;
+    }
+
+    const room = rooms.get(roomId);
     if (!room) {
+      socket.data.roomId = null;
       return;
     }
 
-    if (room.hostId !== socket.id) {
-      socket.emit("room:error", "Only the host can change rounds.");
+    const leavingIndex = room.players.findIndex((p) => p.id === socket.id);
+    if (leavingIndex === -1) {
+      socket.data.roomId = null;
       return;
     }
 
-    if (room.started) {
-      socket.emit("room:error", "Cannot change rounds after the game starts.");
+    const [leavingPlayer] = room.players.splice(leavingIndex, 1);
+    room.lastEvent = `${leavingPlayer.name} left the room.`;
+
+    if (room.players.length === 0) {
+      rooms.delete(roomId);
+      socket.data.roomId = null;
       return;
     }
 
-    const rounds = Number(totalRounds);
-    if (!Number.isInteger(rounds) || rounds < 1 || rounds > 50) {
-      socket.emit("room:error", "Rounds must be between 1 and 50.");
-      return;
+    if (room.hostId === socket.id) {
+      room.hostId = room.players[0].id;
+      room.lastEvent = `${room.players[0].name} is now the host.`;
     }
 
-    room.totalRounds = rounds;
-    room.lastEvent = `Total rounds set to ${rounds}.`;
+    if (leavingIndex < room.currentTurnIndex) {
+      room.currentTurnIndex = Math.max(0, room.currentTurnIndex - 1);
+    } else if (leavingIndex === room.currentTurnIndex) {
+      room.currentTurnIndex = Math.max(0, room.currentTurnIndex - 1);
+      advanceTurn(room);
+    }
+
+    ensureValidTurn(room);
+    socket.data.roomId = null;
+    socket.leave(roomId);
     emitRoom(room);
   });
 
@@ -283,6 +379,7 @@ io.on("connection", (socket) => {
 
     room.started = true;
     room.finished = false;
+    room.rollHistory = [];
     room.players.forEach((player) => {
       player.score = 0;
     });
@@ -303,6 +400,7 @@ io.on("connection", (socket) => {
 
     room.started = true;
     room.finished = false;
+    room.rollHistory = [];
     room.players.forEach((player) => {
       player.score = 0;
     });
@@ -382,6 +480,14 @@ io.on("connection", (socket) => {
         activeRoom.pot += 10;
         activeRoom.isFirstRoll = false;
         activeRoom.lastEvent = `${currentPlayer.name} rolled a 1 (first roll) for 10 points.`;
+        pushRollHistory(activeRoom, {
+          playerId: currentPlayer.id,
+          playerName: currentPlayer.name,
+          roll,
+          round: activeRoom.currentRound,
+          pot: activeRoom.pot,
+          message: `${currentPlayer.name} rolled a 1 (first roll) +10.`,
+        });
         advanceTurn(activeRoom);
         emitRoom(activeRoom);
         return;
@@ -390,6 +496,14 @@ io.on("connection", (socket) => {
       if (roll === 1) {
         activeRoom.isFirstRoll = false;
         activeRoom.lastEvent = `${currentPlayer.name} rolled a 1 — bust.`;
+        pushRollHistory(activeRoom, {
+          playerId: currentPlayer.id,
+          playerName: currentPlayer.name,
+          roll,
+          round: activeRoom.currentRound,
+          pot: activeRoom.pot,
+          message: `${currentPlayer.name} rolled a 1 — bust.`,
+        });
         endRound(activeRoom, "bust");
         emitRoom(activeRoom);
         return;
@@ -399,6 +513,14 @@ io.on("connection", (socket) => {
         activeRoom.pot = activeRoom.pot * 2;
         activeRoom.isFirstRoll = false;
         activeRoom.lastEvent = `${currentPlayer.name} rolled a 2 — pot doubled.`;
+        pushRollHistory(activeRoom, {
+          playerId: currentPlayer.id,
+          playerName: currentPlayer.name,
+          roll,
+          round: activeRoom.currentRound,
+          pot: activeRoom.pot,
+          message: `${currentPlayer.name} rolled a 2 — pot doubled.`,
+        });
         advanceTurn(activeRoom);
         emitRoom(activeRoom);
         return;
@@ -407,6 +529,14 @@ io.on("connection", (socket) => {
       activeRoom.pot += roll;
       activeRoom.isFirstRoll = false;
       activeRoom.lastEvent = `${currentPlayer.name} rolled a ${roll}.`;
+      pushRollHistory(activeRoom, {
+        playerId: currentPlayer.id,
+        playerName: currentPlayer.name,
+        roll,
+        round: activeRoom.currentRound,
+        pot: activeRoom.pot,
+        message: `${currentPlayer.name} rolled a ${roll}.`,
+      });
       advanceTurn(activeRoom);
       emitRoom(activeRoom);
     }, 900);
@@ -428,21 +558,17 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const [leavingPlayer] = room.players.splice(leavingIndex, 1);
-    room.lastEvent = `${leavingPlayer.name} left the room.`;
+    const leavingPlayer = room.players[leavingIndex];
+    leavingPlayer.connected = false;
+    room.lastEvent = `${leavingPlayer.name} disconnected.`;
 
-    if (room.players.length === 0) {
-      rooms.delete(roomId);
+    if (room.players.every((player) => !player.connected)) {
+      emitRoom(room);
       return;
     }
 
-    if (room.hostId === socket.id) {
-      room.hostId = room.players[0].id;
-      room.lastEvent = `${room.players[0].name} is now the host.`;
-    }
-
-    if (leavingIndex < room.currentTurnIndex) {
-      room.currentTurnIndex = Math.max(0, room.currentTurnIndex - 1);
+    if (leavingIndex === room.currentTurnIndex) {
+      advanceTurn(room);
     }
 
     ensureValidTurn(room);
