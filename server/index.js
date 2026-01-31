@@ -27,10 +27,12 @@ const simulatePossiblePot = (room) => {
   let roundRolls = room.roundRolls;
   let isFirstRoll = roundRolls === 0;
   let simulatedRolls = 0;
+  const simulatedSequence = [];
 
   while (true) {
     const roll = rollDie();
     simulatedRolls += 1;
+    simulatedSequence.push(roll);
     if (isFirstRoll && roll === 1) {
       pot += 10;
       roundRolls += 1;
@@ -61,7 +63,7 @@ const simulatePossiblePot = (room) => {
     isFirstRoll = false;
   }
 
-  return { pot, simulatedRolls };
+  return { pot, simulatedRolls, simulatedSequence };
 };
 
 const makePlayerToken = () => crypto.randomUUID();
@@ -125,6 +127,7 @@ const startRound = (room, roundNumber) => {
   room.pot = 0;
   room.isFirstRoll = true;
   room.roundRolls = 0;
+  room.roundRollSequence = [];
   room.rolling = false;
   room.players.forEach((player) => {
     if (player.connected) {
@@ -152,6 +155,8 @@ const endRound = (room, reason) => {
     reason === "allBanked" ? simulatePossiblePot(room) : null;
   const possiblePot = simulated ? simulated.pot : roundEndPot;
   const simulatedRolls = simulated ? simulated.simulatedRolls : 0;
+  const simulatedSequence = simulated ? simulated.simulatedSequence : [];
+  const actualSequence = room.roundRollSequence || [];
   const roundNumber = room.currentRound;
   room.players.forEach((player) => {
     if (!player.participatedInRound) {
@@ -171,6 +176,8 @@ const endRound = (room, reason) => {
         possible,
         percent,
         simulatedRolls,
+        simulatedSequence,
+        actualSequence,
       },
       ...(player.roundHistory || []),
     ].slice(0, 10);
@@ -270,6 +277,7 @@ const createRoom = ({ hostId, hostName, totalRounds }) => {
     currentTurnIndex: 0,
     isFirstRoll: true,
     roundRolls: 0,
+    roundRollSequence: [],
     rolling: false,
     lastRoll: null,
     lastRollPlayerId: null,
@@ -561,6 +569,7 @@ io.on("connection", (socket) => {
       activeRoom.lastRoll = roll;
       activeRoom.lastRollPlayerId = currentPlayer.id;
       activeRoom.rolling = false;
+      activeRoom.roundRollSequence.push(roll);
 
       if (isFirstRoll && roll === 1) {
         activeRoom.pot += 10;

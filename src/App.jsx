@@ -57,6 +57,7 @@ function App() {
   const [roundsInput, setRoundsInput] = useState(10);
   const [homeMode, setHomeMode] = useState(null);
   const [error, setError] = useState("");
+  const [rollModal, setRollModal] = useState(null);
   const [playerToken] = useState(() => getPlayerToken());
 
   useEffect(() => {
@@ -193,6 +194,8 @@ function App() {
     setHomeMode(null);
     setRoomCode("");
   };
+
+  const closeRollModal = () => setRollModal(null);
 
   return (
     <div className="app">
@@ -506,6 +509,18 @@ function App() {
                             </div>
                           )}
                         </dl>
+                        {((entry.actualSequence &&
+                          entry.actualSequence.length > 0) ||
+                          (entry.simulatedSequence &&
+                            entry.simulatedSequence.length > 0)) && (
+                            <button
+                              className="round-history-link"
+                              type="button"
+                              onClick={() => setRollModal(entry)}
+                            >
+                              View rolls
+                            </button>
+                          )}
                       </li>
                     ))}
                   </ul>
@@ -516,6 +531,63 @@ function App() {
             </div>
           </div>
         </section>
+      )}
+      {rollModal && (
+        <div className="modal-scrim" onClick={closeRollModal}>
+          <div
+            className="modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3>Round {rollModal.round} simulated rolls</h3>
+              <button className="modal-close" onClick={closeRollModal}>
+                Close
+              </button>
+            </div>
+            <div className="modal-body">
+              {rollModal.actualSequence &&
+                rollModal.actualSequence.length > 0 && (
+                  <div className="roll-group">
+                    <div className="roll-group-header">
+                      <span className="roll-group-title">Actual rolls</span>
+                      <span className="roll-group-badge actual">Live</span>
+                    </div>
+                    <div className="roll-sequence">
+                      {rollModal.actualSequence.map((roll, index) => (
+                        <span
+                          key={`actual-${roll}-${index}`}
+                          className={`roll-pill${roll === 1 ? " bust" : ""}`}
+                        >
+                          {roll}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              {rollModal.simulatedSequence &&
+                rollModal.simulatedSequence.length > 0 && (
+                  <div className="roll-group">
+                    <div className="roll-group-header">
+                      <span className="roll-group-title">Simulated rolls</span>
+                      <span className="roll-group-badge simulated">
+                        Hypothetical
+                      </span>
+                    </div>
+                    <div className="roll-sequence">
+                      {rollModal.simulatedSequence.map((roll, index) => (
+                        <span
+                          key={`sim-${roll}-${index}`}
+                          className={`roll-pill${roll === 1 ? " bust" : ""}`}
+                        >
+                          {roll}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
