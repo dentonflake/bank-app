@@ -5,7 +5,8 @@ import { Server } from "socket.io";
 
 const app = express();
 const httpServer = createServer(app);
-const allowedOrigins = (process.env.CORS_ORIGIN || "https://bank.dentonflake.com")
+const allowedOrigins = (process.env.CORS_ORIGIN ||
+  "https://bank.dentonflake.com,http://localhost:5173")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
@@ -20,6 +21,48 @@ const io = new Server(httpServer, {
 const rooms = new Map();
 
 const rollDie = () => Math.floor(Math.random() * 6) + 1;
+
+const simulatePossiblePot = (room) => {
+  let pot = room.pot;
+  let roundRolls = room.roundRolls;
+  let isFirstRoll = roundRolls === 0;
+  let simulatedRolls = 0;
+
+  while (true) {
+    const roll = rollDie();
+    simulatedRolls += 1;
+    if (isFirstRoll && roll === 1) {
+      pot += 10;
+      roundRolls += 1;
+      isFirstRoll = false;
+      continue;
+    }
+
+    if (roll === 1) {
+      break;
+    }
+
+    if (isFirstRoll && roll === 2) {
+      pot += 2;
+      roundRolls += 1;
+      isFirstRoll = false;
+      continue;
+    }
+
+    if (roll === 2) {
+      pot *= 2;
+      roundRolls += 1;
+      isFirstRoll = false;
+      continue;
+    }
+
+    pot += roll;
+    roundRolls += 1;
+    isFirstRoll = false;
+  }
+
+  return { pot, simulatedRolls };
+};
 
 const makePlayerToken = () => crypto.randomUUID();
 
@@ -42,6 +85,7 @@ const toPublicRoom = (room) => ({
     banked: player.banked,
     eligible: player.eligible,
     connected: player.connected,
+    roundHistory: player.roundHistory ?? [],
   })),
   started: room.started,
   finished: room.finished,
@@ -54,7 +98,6 @@ const toPublicRoom = (room) => ({
   lastRoll: room.lastRoll ?? null,
   lastRollPlayerId: room.lastRollPlayerId ?? null,
   lastEvent: room.lastEvent ?? "",
-  rollHistory: room.rollHistory ?? [],
 });
 
 const emitRoom = (room) => {
@@ -77,24 +120,19 @@ const firstEligibleUnbankedIndex = (room) => {
 const hasEligibleUnbanked = (room) =>
   room.players.some((player) => isActivePlayer(player));
 
-const pushRollHistory = (room, entry) => {
-  room.rollHistory.unshift({
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    ...entry,
-  });
-  room.rollHistory = room.rollHistory.slice(0, 12);
-};
-
 const startRound = (room, roundNumber) => {
   room.currentRound = roundNumber;
   room.pot = 0;
   room.isFirstRoll = true;
+  room.roundRolls = 0;
   room.rolling = false;
   room.players.forEach((player) => {
     if (player.connected) {
       player.eligible = true;
       player.banked = false;
     }
+    player.roundPoints = 0;
+    player.participatedInRound = player.connected;
   });
   room.currentTurnIndex = firstEligibleUnbankedIndex(room);
   room.lastEvent = `Round ${room.currentRound} started.`;
@@ -109,6 +147,37 @@ const endGame = (room) => {
 };
 
 const endRound = (room, reason) => {
+  const roundEndPot = room.pot;
+  const simulated =
+    reason === "allBanked" ? simulatePossiblePot(room) : null;
+  const possiblePot = simulated ? simulated.pot : roundEndPot;
+  const simulatedRolls = simulated ? simulated.simulatedRolls : 0;
+  const roundNumber = room.currentRound;
+  room.players.forEach((player) => {
+    if (!player.participatedInRound) {
+      return;
+    }
+    const possible = possiblePot;
+    const points = player.roundPoints || 0;
+    const percent =
+      possible > 0 ? Math.round((points / possible) * 100) : 0;
+    player.roundHistory = [
+      {
+        id: `${roundNumber}-${Date.now()}-${Math.random()
+          .toString(16)
+          .slice(2)}`,
+        round: roundNumber,
+        points,
+        possible,
+        percent,
+        simulatedRolls,
+      },
+      ...(player.roundHistory || []),
+    ].slice(0, 10);
+    player.roundPoints = 0;
+    player.participatedInRound = false;
+  });
+
   if (reason === "bust") {
     room.players.forEach((player) => {
       if (player.eligible) {
@@ -188,6 +257,9 @@ const createRoom = ({ hostId, hostName, totalRounds }) => {
         eligible: true,
         connected: true,
         token: hostToken,
+        roundHistory: [],
+        roundPoints: 0,
+        participatedInRound: true,
       },
     ],
     started: false,
@@ -197,11 +269,11 @@ const createRoom = ({ hostId, hostName, totalRounds }) => {
     pot: 0,
     currentTurnIndex: 0,
     isFirstRoll: true,
+    roundRolls: 0,
     rolling: false,
     lastRoll: null,
     lastRollPlayerId: null,
     lastEvent: "Room created.",
-    rollHistory: [],
   };
 
   rooms.set(id, room);
@@ -305,6 +377,9 @@ io.on("connection", (socket) => {
       eligible: !(room.started && !room.finished),
       connected: true,
       token: token || makePlayerToken(),
+      roundHistory: [],
+      roundPoints: 0,
+      participatedInRound: false,
     };
 
     room.players.push(player);
@@ -384,9 +459,11 @@ io.on("connection", (socket) => {
 
     room.started = true;
     room.finished = false;
-    room.rollHistory = [];
     room.players.forEach((player) => {
       player.score = 0;
+      player.roundHistory = [];
+      player.roundPoints = 0;
+      player.participatedInRound = false;
     });
     startRound(room, 1);
     emitRoom(room);
@@ -405,9 +482,11 @@ io.on("connection", (socket) => {
 
     room.started = true;
     room.finished = false;
-    room.rollHistory = [];
     room.players.forEach((player) => {
       player.score = 0;
+      player.roundHistory = [];
+      player.roundPoints = 0;
+      player.participatedInRound = false;
     });
     startRound(room, 1);
     emitRoom(room);
@@ -431,6 +510,7 @@ io.on("connection", (socket) => {
 
     player.score += room.pot;
     player.banked = true;
+    player.roundPoints = room.pot;
     room.lastEvent = `${player.name} banked ${room.pot} points.`;
 
     if (!hasEligibleUnbanked(room)) {
@@ -477,71 +557,54 @@ io.on("connection", (socket) => {
       }
 
       const roll = rollDie();
+      const isFirstRoll = activeRoom.roundRolls === 0;
       activeRoom.lastRoll = roll;
       activeRoom.lastRollPlayerId = currentPlayer.id;
       activeRoom.rolling = false;
 
-      if (activeRoom.isFirstRoll && roll === 1) {
+      if (isFirstRoll && roll === 1) {
         activeRoom.pot += 10;
+        activeRoom.roundRolls += 1;
         activeRoom.isFirstRoll = false;
         activeRoom.lastEvent = `${currentPlayer.name} rolled a 1 (first roll) for 10 points.`;
-        pushRollHistory(activeRoom, {
-          playerId: currentPlayer.id,
-          playerName: currentPlayer.name,
-          roll,
-          round: activeRoom.currentRound,
-          pot: activeRoom.pot,
-          message: `${currentPlayer.name} rolled a 1 (first roll) +10.`,
-        });
         advanceTurn(activeRoom);
         emitRoom(activeRoom);
         return;
       }
 
       if (roll === 1) {
+        activeRoom.roundRolls += 1;
         activeRoom.isFirstRoll = false;
         activeRoom.lastEvent = `${currentPlayer.name} rolled a 1 — bust.`;
-        pushRollHistory(activeRoom, {
-          playerId: currentPlayer.id,
-          playerName: currentPlayer.name,
-          roll,
-          round: activeRoom.currentRound,
-          pot: activeRoom.pot,
-          message: `${currentPlayer.name} rolled a 1 — bust.`,
-        });
         endRound(activeRoom, "bust");
+        emitRoom(activeRoom);
+        return;
+      }
+
+      if (isFirstRoll && roll === 2) {
+        activeRoom.pot += 2;
+        activeRoom.roundRolls += 1;
+        activeRoom.isFirstRoll = false;
+        activeRoom.lastEvent = `${currentPlayer.name} rolled a 2 (first roll) for 2 points.`;
+        advanceTurn(activeRoom);
         emitRoom(activeRoom);
         return;
       }
 
       if (roll === 2) {
         activeRoom.pot = activeRoom.pot * 2;
+        activeRoom.roundRolls += 1;
         activeRoom.isFirstRoll = false;
         activeRoom.lastEvent = `${currentPlayer.name} rolled a 2 — pot doubled.`;
-        pushRollHistory(activeRoom, {
-          playerId: currentPlayer.id,
-          playerName: currentPlayer.name,
-          roll,
-          round: activeRoom.currentRound,
-          pot: activeRoom.pot,
-          message: `${currentPlayer.name} rolled a 2 — pot doubled.`,
-        });
         advanceTurn(activeRoom);
         emitRoom(activeRoom);
         return;
       }
 
       activeRoom.pot += roll;
+      activeRoom.roundRolls += 1;
       activeRoom.isFirstRoll = false;
       activeRoom.lastEvent = `${currentPlayer.name} rolled a ${roll}.`;
-      pushRollHistory(activeRoom, {
-        playerId: currentPlayer.id,
-        playerName: currentPlayer.name,
-        roll,
-        round: activeRoom.currentRound,
-        pot: activeRoom.pot,
-        message: `${currentPlayer.name} rolled a ${roll}.`,
-      });
       advanceTurn(activeRoom);
       emitRoom(activeRoom);
     }, 900);

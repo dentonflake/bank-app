@@ -11,6 +11,7 @@ const socket = io(serverUrl, {
 });
 
 const emptyNameMessage = "Enter your name to continue.";
+const formatPot = (value) => `$${value ?? 0}`;
 
 const readSession = () => {
   try {
@@ -352,7 +353,7 @@ function App() {
               <div className="pot-highlight">
                 <div>
                   <p className="label">Pot</p>
-                  <p className="pot-value">{room.pot}</p>
+                  <p className="pot-value">{formatPot(room.pot)}</p>
                 </div>
                 <p className="pot-note">
                   {room.rolling ? "Rolling…" : "Current pot total"}
@@ -476,30 +477,40 @@ function App() {
 
             <div className="panel history-panel">
               <div className="panel-body">
-                <h2>Roll history</h2>
-                {room.rollHistory && room.rollHistory.length > 0 ? (
-                  <ul className="history">
-                    {room.rollHistory.slice(0, 5).map((entry) => (
-                      <li key={entry.id} className="history-item">
-                        <div className="history-main">
-                          <span className="history-roll" aria-hidden="true">
-                            🎲 {entry.roll}
+                <h2>Round history</h2>
+                {me?.roundHistory && me.roundHistory.length > 0 ? (
+                  <ul className="round-history">
+                    {me.roundHistory.slice(0, 5).map((entry) => (
+                      <li key={entry.id} className="round-history-item">
+                        <div className="round-history-header">
+                          <span className="round-history-title">
+                            Round {entry.round ?? 0}
                           </span>
-                          <span className="history-player">
-                            {entry.playerName ?? "Player"}
+                          <span className="round-history-percent">
+                            {entry.percent ?? 0}% close
                           </span>
                         </div>
-                        <div className="history-meta">
-                          <span className="history-round">
-                            R{entry.round ?? 0}
-                          </span>
-                          <span className="history-pot">Pot {entry.pot}</span>
-                        </div>
+                        <dl className="round-history-metrics">
+                          <div className="round-history-metric">
+                            <dt>Earnings</dt>
+                            <dd>{formatPot(entry.points)}</dd>
+                          </div>
+                          <div className="round-history-metric">
+                            <dt>Possible pot</dt>
+                            <dd>{formatPot(entry.possible)}</dd>
+                          </div>
+                          {entry.simulatedRolls > 0 && (
+                            <div className="round-history-metric">
+                              <dt>Simulated rolls</dt>
+                              <dd>{entry.simulatedRolls}</dd>
+                            </div>
+                          )}
+                        </dl>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="history-empty">No rolls yet.</p>
+                  <p className="history-empty">No rounds yet.</p>
                 )}
               </div>
             </div>
