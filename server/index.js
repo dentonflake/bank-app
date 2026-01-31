@@ -5,9 +5,14 @@ import { Server } from "socket.io";
 
 const app = express();
 const httpServer = createServer(app);
+const allowedOrigins = (process.env.CORS_ORIGIN || "https://bank.dentonflake.com")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
   },
 });
