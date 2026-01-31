@@ -22,50 +22,6 @@ const rooms = new Map();
 
 const rollDie = () => Math.floor(Math.random() * 6) + 1;
 
-const simulatePossiblePot = (room) => {
-  let pot = room.pot;
-  let roundRolls = room.roundRolls;
-  let isFirstRoll = roundRolls === 0;
-  let simulatedRolls = 0;
-  const simulatedSequence = [];
-
-  while (true) {
-    const roll = rollDie();
-    simulatedRolls += 1;
-    simulatedSequence.push(roll);
-    if (isFirstRoll && roll === 1) {
-      pot += 10;
-      roundRolls += 1;
-      isFirstRoll = false;
-      continue;
-    }
-
-    if (roll === 1) {
-      break;
-    }
-
-    if (isFirstRoll && roll === 2) {
-      pot += 2;
-      roundRolls += 1;
-      isFirstRoll = false;
-      continue;
-    }
-
-    if (roll === 2) {
-      pot *= 2;
-      roundRolls += 1;
-      isFirstRoll = false;
-      continue;
-    }
-
-    pot += roll;
-    roundRolls += 1;
-    isFirstRoll = false;
-  }
-
-  return { pot, simulatedRolls, simulatedSequence };
-};
-
 const makePlayerToken = () => crypto.randomUUID();
 
 const makeRoomId = () => {
@@ -87,6 +43,8 @@ const toPublicRoom = (room) => ({
     banked: player.banked,
     eligible: player.eligible,
     connected: player.connected,
+    hearts: player.hearts ?? 0,
+    readyForNextRound: player.readyForNextRound ?? false,
     roundHistory: player.roundHistory ?? [],
   })),
   started: room.started,
@@ -99,6 +57,10 @@ const toPublicRoom = (room) => ({
   rolling: room.rolling,
   lastRoll: room.lastRoll ?? null,
   lastRollPlayerId: room.lastRollPlayerId ?? null,
+  roundEnded: room.roundEnded ?? false,
+  pendingHeartPlayerId: room.pendingHeart?.playerId ?? null,
+  lastBustId: room.lastBust?.id ?? 0,
+  lastBustPlayerIds: room.lastBust?.playerIds ?? [],
   lastEvent: room.lastEvent ?? "",
 });
 
@@ -119,6 +81,22 @@ const firstEligibleUnbankedIndex = (room) => {
   return -1;
 };
 
+const firstEligibleUnbankedFromIndex = (room, startIndex) => {
+  if (room.players.length === 0) {
+    return -1;
+  }
+  const totalPlayers = room.players.length;
+  let index = startIndex;
+  for (let i = 0; i < totalPlayers; i += 1) {
+    const player = room.players[index];
+    if (isActivePlayer(player)) {
+      return index;
+    }
+    index = (index + 1) % totalPlayers;
+  }
+  return -1;
+};
+
 const hasEligibleUnbanked = (room) =>
   room.players.some((player) => isActivePlayer(player));
 
@@ -129,16 +107,22 @@ const startRound = (room, roundNumber) => {
   room.roundRolls = 0;
   room.roundRollSequence = [];
   room.rolling = false;
+  room.roundEnded = false;
+  room.pendingHeart = null;
   room.players.forEach((player) => {
     if (player.connected) {
       player.eligible = true;
       player.banked = false;
     }
+    player.readyForNextRound = false;
     player.roundPoints = 0;
     player.roundBankIndex = null;
     player.participatedInRound = player.connected;
   });
-  room.currentTurnIndex = firstEligibleUnbankedIndex(room);
+  const startingIndex =
+    typeof room.nextStartIndex === "number" ? room.nextStartIndex : 0;
+  room.currentTurnIndex = firstEligibleUnbankedFromIndex(room, startingIndex);
+  room.nextStartIndex = null;
   room.lastEvent = `Round ${room.currentRound} started.`;
 };
 
@@ -147,26 +131,19 @@ const endGame = (room) => {
   room.started = true;
   room.rolling = false;
   room.pot = 0;
+  room.roundEnded = false;
+  room.pendingHeart = null;
   room.lastEvent = `Game over after ${room.totalRounds} rounds.`;
 };
 
 const endRound = (room, reason) => {
-  const roundEndPot = room.pot;
-  const simulated =
-    reason === "allBanked" ? simulatePossiblePot(room) : null;
-  const possiblePot = simulated ? simulated.pot : roundEndPot;
-  const simulatedRolls = simulated ? simulated.simulatedRolls : 0;
-  const simulatedSequence = simulated ? simulated.simulatedSequence : [];
   const actualSequence = room.roundRollSequence || [];
   const roundNumber = room.currentRound;
   room.players.forEach((player) => {
     if (!player.participatedInRound) {
       return;
     }
-    const possible = possiblePot;
     const points = player.roundPoints || 0;
-    const percent =
-      possible > 0 ? Math.round((points / possible) * 100) : 0;
     player.roundHistory = [
       {
         id: `${roundNumber}-${Date.now()}-${Math.random()
@@ -174,10 +151,6 @@ const endRound = (room, reason) => {
           .slice(2)}`,
         round: roundNumber,
         points,
-        possible,
-        percent,
-        simulatedRolls,
-        simulatedSequence,
         actualSequence,
         bankIndex: player.roundBankIndex,
       },
@@ -189,6 +162,12 @@ const endRound = (room, reason) => {
   });
 
   if (reason === "bust") {
+    room.lastBust = {
+      id: (room.lastBust?.id ?? 0) + 1,
+      playerIds: room.players
+        .filter((player) => player.eligible && !player.banked)
+        .map((player) => player.id),
+    };
     room.players.forEach((player) => {
       if (player.eligible) {
         player.banked = true;
@@ -199,14 +178,37 @@ const endRound = (room, reason) => {
     room.lastEvent = `Round ${room.currentRound} ended (all banked).`;
   }
 
+  const totalPlayers = room.players.length;
+  if (totalPlayers > 0) {
+    const lastRollIndex =
+      room.lastRollPlayerId != null
+        ? room.players.findIndex((p) => p.id === room.lastRollPlayerId)
+        : room.currentTurnIndex;
+    const baseIndex = lastRollIndex >= 0 ? lastRollIndex : room.currentTurnIndex;
+    room.nextStartIndex = (baseIndex + 1) % totalPlayers;
+  }
+
   if (room.currentRound >= room.totalRounds) {
     endGame(room);
-  } else {
-    startRound(room, room.currentRound + 1);
+    return;
   }
+
+  room.roundEnded = true;
+  room.pendingHeart = null;
+  room.rolling = false;
+  room.players.forEach((player) => {
+    player.eligible = false;
+    player.banked = true;
+    player.readyForNextRound = !player.connected;
+  });
+  room.currentTurnIndex = 0;
 };
 
 const advanceTurn = (room) => {
+  if (room.roundEnded || room.pendingHeart) {
+    return;
+  }
+
   if (!hasEligibleUnbanked(room)) {
     endRound(room, "allBanked");
     return;
@@ -231,6 +233,10 @@ const advanceTurn = (room) => {
 
 const ensureValidTurn = (room) => {
   if (!room.started || room.finished) {
+    return;
+  }
+
+  if (room.roundEnded || room.pendingHeart) {
     return;
   }
 
@@ -271,6 +277,8 @@ const createRoom = ({ hostId, hostName, totalRounds }) => {
         roundPoints: 0,
         roundBankIndex: null,
         participatedInRound: true,
+        hearts: 0,
+        readyForNextRound: false,
       },
     ],
     started: false,
@@ -285,6 +293,9 @@ const createRoom = ({ hostId, hostName, totalRounds }) => {
     rolling: false,
     lastRoll: null,
     lastRollPlayerId: null,
+    roundEnded: false,
+    pendingHeart: null,
+    lastBust: { id: 0, playerIds: [] },
     lastEvent: "Room created.",
   };
 
@@ -340,6 +351,9 @@ io.on("connection", (socket) => {
     existingPlayer.id = socket.id;
     existingPlayer.name = name || existingPlayer.name;
     existingPlayer.connected = true;
+    if (room.roundEnded) {
+      existingPlayer.readyForNextRound = false;
+    }
 
     socket.data.roomId = room.id;
     socket.join(room.id);
@@ -393,6 +407,8 @@ io.on("connection", (socket) => {
       roundPoints: 0,
       roundBankIndex: null,
       participatedInRound: false,
+      hearts: 0,
+      readyForNextRound: false,
     };
 
     room.players.push(player);
@@ -436,6 +452,13 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (room.pendingHeart?.playerId === leavingPlayer.id) {
+      room.pendingHeart = null;
+      endRound(room, "bust");
+      emitRoom(room);
+      return;
+    }
+
     if (room.hostId === socket.id) {
       room.hostId = room.players[0].id;
       room.lastEvent = `${room.players[0].name} is now the host.`;
@@ -451,6 +474,52 @@ io.on("connection", (socket) => {
     ensureValidTurn(room);
     socket.data.roomId = null;
     socket.leave(roomId);
+    emitRoom(room);
+  });
+
+  socket.on("room:kick", ({ playerId }) => {
+    const room = rooms.get(socket.data.roomId);
+    if (!room) {
+      return;
+    }
+
+    if (room.hostId !== socket.id) {
+      socket.emit("room:error", "Only the host can kick players.");
+      return;
+    }
+
+    if (!playerId || playerId === room.hostId) {
+      return;
+    }
+
+    const kickedIndex = room.players.findIndex((p) => p.id === playerId);
+    if (kickedIndex === -1) {
+      return;
+    }
+
+    const [kickedPlayer] = room.players.splice(kickedIndex, 1);
+    room.lastEvent = `${kickedPlayer.name} was kicked from the room.`;
+
+    if (room.players.length === 0) {
+      rooms.delete(room.id);
+      return;
+    }
+
+    if (kickedIndex < room.currentTurnIndex) {
+      room.currentTurnIndex = Math.max(0, room.currentTurnIndex - 1);
+    } else if (kickedIndex === room.currentTurnIndex) {
+      room.currentTurnIndex = Math.max(0, room.currentTurnIndex - 1);
+      advanceTurn(room);
+    }
+
+    if (room.pendingHeart?.playerId === kickedPlayer.id) {
+      room.pendingHeart = null;
+      endRound(room, "bust");
+    }
+
+    ensureValidTurn(room);
+    io.to(kickedPlayer.id).emit("room:kicked");
+    io.sockets.sockets.get(kickedPlayer.id)?.leave(room.id);
     emitRoom(room);
   });
 
@@ -478,6 +547,8 @@ io.on("connection", (socket) => {
       player.roundPoints = 0;
       player.roundBankIndex = null;
       player.participatedInRound = false;
+      player.hearts = 0;
+      player.readyForNextRound = false;
     });
     startRound(room, 1);
     emitRoom(room);
@@ -502,6 +573,8 @@ io.on("connection", (socket) => {
       player.roundPoints = 0;
       player.roundBankIndex = null;
       player.participatedInRound = false;
+      player.hearts = 0;
+      player.readyForNextRound = false;
     });
     startRound(room, 1);
     emitRoom(room);
@@ -510,6 +583,10 @@ io.on("connection", (socket) => {
   socket.on("game:bank", () => {
     const room = rooms.get(socket.data.roomId);
     if (!room || !room.started || room.finished) {
+      return;
+    }
+
+    if (room.roundEnded || room.pendingHeart) {
       return;
     }
 
@@ -541,6 +618,10 @@ io.on("connection", (socket) => {
   socket.on("game:roll", () => {
     const room = rooms.get(socket.data.roomId);
     if (!room || !room.started || room.finished) {
+      return;
+    }
+
+    if (room.roundEnded || room.pendingHeart) {
       return;
     }
 
@@ -592,6 +673,18 @@ io.on("connection", (socket) => {
       if (roll === 1) {
         activeRoom.roundRolls += 1;
         activeRoom.isFirstRoll = false;
+        const activePlayer = activeRoom.players.find(
+          (player) => player.id === currentPlayer.id
+        );
+        if (activePlayer && activePlayer.hearts > 0) {
+          activeRoom.pendingHeart = {
+            playerId: currentPlayer.id,
+          };
+          activeRoom.lastEvent = `${currentPlayer.name} rolled a 1 — heart decision.`;
+          emitRoom(activeRoom);
+          return;
+        }
+
         activeRoom.lastEvent = `${currentPlayer.name} rolled a 1 — bust.`;
         endRound(activeRoom, "bust");
         emitRoom(activeRoom);
@@ -627,6 +720,87 @@ io.on("connection", (socket) => {
     }, 900);
   });
 
+  socket.on("round:ready", () => {
+    const room = rooms.get(socket.data.roomId);
+    if (!room || !room.started || room.finished || !room.roundEnded) {
+      return;
+    }
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player || !player.connected) {
+      return;
+    }
+
+    player.readyForNextRound = true;
+    room.lastEvent = `${player.name} is ready.`;
+
+    const connectedPlayers = room.players.filter((p) => p.connected);
+    const allReady =
+      connectedPlayers.length > 0 &&
+      connectedPlayers.every((p) => p.readyForNextRound);
+    if (allReady) {
+      startRound(room, room.currentRound + 1);
+    }
+
+    emitRoom(room);
+  });
+
+  socket.on("heart:buy", () => {
+    const room = rooms.get(socket.data.roomId);
+    if (!room || !room.started || room.finished || !room.roundEnded) {
+      return;
+    }
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player || !player.connected) {
+      return;
+    }
+
+    if (player.hearts >= 3) {
+      socket.emit("room:error", "You already have 3 hearts.");
+      return;
+    }
+
+    if (player.score < 100) {
+      socket.emit("room:error", "Not enough funds to buy a heart.");
+      return;
+    }
+
+    player.score -= 100;
+    player.hearts += 1;
+    room.lastEvent = `${player.name} bought a heart.`;
+    emitRoom(room);
+  });
+
+  socket.on("heart:decision", ({ use }) => {
+    const room = rooms.get(socket.data.roomId);
+    if (!room || !room.started || room.finished) {
+      return;
+    }
+
+    if (!room.pendingHeart) {
+      return;
+    }
+
+    const player = room.players.find((p) => p.id === socket.id);
+    if (!player || room.pendingHeart.playerId !== player.id) {
+      return;
+    }
+
+    if (use && player.hearts > 0) {
+      player.hearts -= 1;
+      room.pendingHeart = null;
+      room.lastEvent = `${player.name} used a heart.`;
+      advanceTurn(room);
+      emitRoom(room);
+      return;
+    }
+
+    room.pendingHeart = null;
+    endRound(room, "bust");
+    emitRoom(room);
+  });
+
   socket.on("disconnect", () => {
     const roomId = socket.data.roomId;
     if (!roomId) {
@@ -645,7 +819,17 @@ io.on("connection", (socket) => {
 
     const leavingPlayer = room.players[leavingIndex];
     leavingPlayer.connected = false;
+    if (room.roundEnded) {
+      leavingPlayer.readyForNextRound = true;
+    }
     room.lastEvent = `${leavingPlayer.name} disconnected.`;
+
+    if (room.pendingHeart?.playerId === leavingPlayer.id) {
+      room.pendingHeart = null;
+      endRound(room, "bust");
+      emitRoom(room);
+      return;
+    }
 
     if (room.players.every((player) => !player.connected)) {
       emitRoom(room);

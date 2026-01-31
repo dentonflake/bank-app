@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import "./App.css";
 
@@ -12,6 +12,25 @@ const socket = io(serverUrl, {
 
 const emptyNameMessage = "Enter your name to continue.";
 const formatPot = (value) => `$${value ?? 0}`;
+const renderHearts = (count, className = "") => (
+  <div
+    className={`hearts ${className}`.trim()}
+    role="img"
+    aria-label={`Hearts ${count ?? 0} of 3`}
+  >
+    {[0, 1, 2].map((index) => (
+      <span
+        key={`heart-${index}`}
+        className={`heart ${index < (count ?? 0) ? "filled" : "empty"}`}
+        aria-hidden="true"
+      >
+        <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+          <path d="M12 21.5l-1.4-1.3C5.2 15.3 2 12.4 2 8.9 2 6.1 4.2 4 7 4c1.7 0 3.3.8 4.3 2.1C12.7 4.8 14.3 4 16 4c2.8 0 5 2.1 5 4.9 0 3.5-3.2 6.4-8.6 11.3L12 21.5z" />
+        </svg>
+      </span>
+    ))}
+  </div>
+);
 
 const readSession = () => {
   try {
@@ -58,7 +77,13 @@ function App() {
   const [homeMode, setHomeMode] = useState(null);
   const [error, setError] = useState("");
   const [rollModal, setRollModal] = useState(null);
+  const [kickPrompt, setKickPrompt] = useState(null);
   const [playerToken] = useState(() => getPlayerToken());
+  const rollAudioRef = useRef(null);
+  const bankAudioRef = useRef(null);
+  const thudAudioRef = useRef(null);
+  const lastEventRef = useRef("");
+  const lastBustIdRef = useRef(0);
 
   useEffect(() => {
     const session = readSession();
@@ -99,14 +124,41 @@ function App() {
       }
       setTimeout(() => setError(""), 2500);
     });
+    socket.on("room:kicked", () => {
+      clearSessionAndToken();
+      setRoom(null);
+      setHomeMode(null);
+      setRoomCode("");
+      setError("You were removed from the room.");
+      setTimeout(() => setError(""), 2500);
+    });
 
     return () => {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
       socket.off("room:state");
       socket.off("room:error");
+      socket.off("room:kicked");
       socket.disconnect();
     };
+  }, []);
+
+  useEffect(() => {
+    if (!rollAudioRef.current) {
+      const audio = new Audio("/sounds/dice.mp3");
+      audio.volume = 0.4;
+      rollAudioRef.current = audio;
+    }
+    if (!bankAudioRef.current) {
+      const audio = new Audio("/sounds/cash.mp3");
+      audio.volume = 0.45;
+      bankAudioRef.current = audio;
+    }
+    if (!thudAudioRef.current) {
+      const audio = new Audio("/sounds/thud.mp3");
+      audio.volume = 0.45;
+      thudAudioRef.current = audio;
+    }
   }, []);
 
   const me = useMemo(() => {
@@ -124,24 +176,54 @@ function App() {
     }
   }, [room, me, playerToken]);
 
+  useEffect(() => {
+    if (!room) {
+      return;
+    }
+    if (room.lastEvent && room.lastEvent !== lastEventRef.current) {
+      lastEventRef.current = room.lastEvent;
+    }
+  }, [room]);
+
+  useEffect(() => {
+    if (!room || !socketId) {
+      return;
+    }
+    const bustId = room.lastBustId ?? 0;
+    if (bustId === 0 || bustId === lastBustIdRef.current) {
+      return;
+    }
+    lastBustIdRef.current = bustId;
+    if (room.lastBustPlayerIds?.includes(socketId)) {
+      thudAudioRef.current?.play?.().catch(() => {});
+    }
+  }, [room, socketId]);
+
   const currentPlayer = room?.players?.[room?.currentTurnIndex ?? 0] ?? null;
   const isHost = room?.hostId === socketId;
   const gameStarted = Boolean(room?.started);
   const gameFinished = Boolean(room?.finished);
+  const roundEnded = Boolean(room?.roundEnded);
+  const waitingOnHeart = Boolean(room?.pendingHeartPlayerId);
   const isMyTurn = currentPlayer?.id === socketId;
   const canBank =
     gameStarted &&
     !gameFinished &&
     !room?.rolling &&
+    !roundEnded &&
+    !waitingOnHeart &&
     me?.eligible &&
     !me?.banked;
   const canRoll =
     gameStarted &&
     !gameFinished &&
     !room?.rolling &&
+    !roundEnded &&
+    !waitingOnHeart &&
     isMyTurn &&
     me?.eligible &&
     !me?.banked;
+  const showHeartPrompt = room?.pendingHeartPlayerId === socketId;
 
   const handleCreateRoom = () => {
     if (!name.trim()) {
@@ -180,11 +262,25 @@ function App() {
   };
 
   const handleRoll = () => {
+    rollAudioRef.current?.play?.().catch(() => {});
     socket.emit("game:roll");
   };
 
   const handleBank = () => {
+    bankAudioRef.current?.play?.().catch(() => {});
     socket.emit("game:bank");
+  };
+
+  const handleReady = () => {
+    socket.emit("round:ready");
+  };
+
+  const handleBuyHeart = () => {
+    socket.emit("heart:buy");
+  };
+
+  const handleHeartDecision = (useHeart) => {
+    socket.emit("heart:decision", { use: useHeart });
   };
 
   const handleLeaveRoom = () => {
@@ -194,6 +290,20 @@ function App() {
     setHomeMode(null);
     setRoomCode("");
   };
+
+  const handleKickPlayer = (playerId, playerName) => {
+    setKickPrompt({ id: playerId, name: playerName || "this player" });
+  };
+
+  const confirmKick = () => {
+    if (!kickPrompt?.id) {
+      return;
+    }
+    socket.emit("room:kick", { playerId: kickPrompt.id });
+    setKickPrompt(null);
+  };
+
+  const cancelKick = () => setKickPrompt(null);
 
   const closeRollModal = () => setRollModal(null);
 
@@ -340,9 +450,9 @@ function App() {
           <div className="grid">
             <div className="panel main-panel">
               <div className="panel-body">
-                <div className="room-meta">
-                  <div>
-                    <p className="eyebrow">Room</p>
+              <div className="room-meta">
+                <div>
+                    <p className="eyebrow">Room code</p>
                   <h2>{room.id}</h2>
                 </div>
                 <div>
@@ -358,9 +468,6 @@ function App() {
                   <p className="label">Pot</p>
                   <p className="pot-value">{formatPot(room.pot)}</p>
                 </div>
-                <p className="pot-note">
-                  {room.rolling ? "Rolling…" : "Current pot total"}
-                </p>
               </div>
 
               <div className="info-block">
@@ -368,18 +475,6 @@ function App() {
                   <p className="label">Turn</p>
                   <p className="value">
                     {currentPlayer ? currentPlayer.name : "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="label">Status</p>
-                  <p className="value">
-                    {room.rolling
-                      ? "Rolling"
-                      : gameFinished
-                      ? "Finished"
-                      : gameStarted
-                      ? "Live"
-                      : "Lobby"}
                   </p>
                 </div>
               </div>
@@ -432,7 +527,49 @@ function App() {
                 )}
               </div>
 
-              {me && !me.eligible && (
+              {gameStarted && !gameFinished && roundEnded && (
+                <div className="intermission">
+                  <div className="intermission-header">
+                    <div>
+                      <p className="label">End of round</p>
+                      <p className="intermission-title">
+                        Ready up for round {room.currentRound + 1}
+                      </p>
+                    </div>
+                    <div className="intermission-meta">
+                      <div>
+                        <p className="label">Balance</p>
+                        <p className="value">{formatPot(me?.score ?? 0)}</p>
+                      </div>
+                      <div>
+                        <p className="label">Hearts</p>
+                        {renderHearts(me?.hearts ?? 0, "hearts-compact")}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="intermission-actions">
+                    <button
+                      className="button ghost"
+                      onClick={handleBuyHeart}
+                      disabled={(me?.hearts ?? 0) >= 3 || (me?.score ?? 0) < 100}
+                    >
+                      Buy heart ($100)
+                    </button>
+                    <button
+                      className="button primary"
+                      onClick={handleReady}
+                      disabled={me?.readyForNextRound}
+                    >
+                      {me?.readyForNextRound ? "Ready" : "Ready up"}
+                    </button>
+                  </div>
+                  <p className="note">
+                    Everyone must be ready to continue the next round.
+                  </p>
+                </div>
+              )}
+
+              {me && !me.eligible && gameStarted && !gameFinished && !roundEnded && (
                 <p className="note">
                   You joined mid-round. You’ll be eligible next round.
                 </p>
@@ -440,7 +577,6 @@ function App() {
               {error && <p className="error">{error}</p>}
             </div>
           </div>
-
             <div className="panel players-panel">
               <div className="panel-body">
                 <h2>Players</h2>
@@ -463,13 +599,43 @@ function App() {
                           </p>
                         </div>
                         <div className="player-score">
-                          <span>{player.score}</span>
-                          {gameStarted && player.banked && (
-                            <span className="badge">Banked</span>
-                          )}
-                          {gameStarted && isCurrent && !player.banked && (
-                            <span className="badge live">Rolling</span>
-                          )}
+                          <div className="player-score-main">
+                            <span className="score-value">
+                              {formatPot(player.score)}
+                            </span>
+                            {isHost && player.id !== room.hostId && (
+                              <button
+                                className="kick-button"
+                                type="button"
+                                onClick={() =>
+                                  handleKickPlayer(player.id, player.name)
+                                }
+                              >
+                                Kick
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="player-divider" />
+                        <div className="player-subrow">
+                          <div className="player-subrow-left">
+                            {renderHearts(player.hearts ?? 0)}
+                          </div>
+                          <div className="player-subrow-right">
+                            {gameStarted && isCurrent && !player.banked && (
+                              <span className="player-status">Rolling</span>
+                            )}
+                            {roundEnded && player.readyForNextRound ? (
+                              <span className="player-status ready">Ready</span>
+                            ) : (
+                              gameStarted &&
+                              player.banked && (
+                                <span className="player-status banked">
+                                  Banked
+                                </span>
+                              )
+                            )}
+                          </div>
                         </div>
                       </li>
                     );
@@ -489,38 +655,23 @@ function App() {
                           <span className="round-history-title">
                             Round {entry.round ?? 0}
                           </span>
-                          <span className="round-history-percent">
-                            {entry.percent ?? 0}% close
-                          </span>
+                          {entry.actualSequence &&
+                            entry.actualSequence.length > 0 && (
+                              <button
+                                className="round-history-link"
+                                type="button"
+                                onClick={() => setRollModal(entry)}
+                              >
+                                View rolls
+                              </button>
+                            )}
                         </div>
                         <dl className="round-history-metrics">
                           <div className="round-history-metric">
                             <dt>Earnings</dt>
                             <dd>{formatPot(entry.points)}</dd>
                           </div>
-                          <div className="round-history-metric">
-                            <dt>Possible pot</dt>
-                            <dd>{formatPot(entry.possible)}</dd>
-                          </div>
-                          {entry.simulatedRolls > 0 && (
-                            <div className="round-history-metric">
-                              <dt>Simulated rolls</dt>
-                              <dd>{entry.simulatedRolls}</dd>
-                            </div>
-                          )}
                         </dl>
-                        {((entry.actualSequence &&
-                          entry.actualSequence.length > 0) ||
-                          (entry.simulatedSequence &&
-                            entry.simulatedSequence.length > 0)) && (
-                            <button
-                              className="round-history-link"
-                              type="button"
-                              onClick={() => setRollModal(entry)}
-                            >
-                              View rolls
-                            </button>
-                          )}
                       </li>
                     ))}
                   </ul>
@@ -555,13 +706,13 @@ function App() {
                       <div className="roll-row roll-header">
                         <span>#</span>
                         <span>Roll</span>
-                        <span>Type</span>
-                        <span>Flag</span>
                       </div>
                       {rollModal.actualSequence.map((roll, index) => (
                         <div
                           key={`actual-${roll}-${index}`}
-                          className="roll-row"
+                          className={`roll-row${
+                            rollModal.bankIndex === index + 1 ? " banked" : ""
+                          }`}
                         >
                           <span>{index + 1}</span>
                           <span
@@ -569,48 +720,68 @@ function App() {
                           >
                             {roll}
                           </span>
-                          <span>Actual</span>
-                          <span>
-                            {rollModal.bankIndex === index + 1 && (
-                              <span className="roll-flag">You banked</span>
-                            )}
-                          </span>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
-              {rollModal.simulatedSequence &&
-                rollModal.simulatedSequence.length > 0 && (
-                  <div className="roll-group">
-                    <div className="roll-group-header">
-                      <span className="roll-group-title">Simulated rolls</span>
-                    </div>
-                    <div className="roll-table">
-                      <div className="roll-row roll-header">
-                        <span>#</span>
-                        <span>Roll</span>
-                        <span>Type</span>
-                        <span>Flag</span>
-                      </div>
-                      {rollModal.simulatedSequence.map((roll, index) => (
-                        <div
-                          key={`sim-${roll}-${index}`}
-                          className="roll-row"
-                        >
-                          <span>{index + 1}</span>
-                          <span
-                            className={`roll-cell${roll === 1 ? " bust" : ""}`}
-                          >
-                            {roll}
-                          </span>
-                          <span>Simulated</span>
-                          <span />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+            </div>
+          </div>
+        </div>
+      )}
+      {showHeartPrompt && (
+        <div className="modal-scrim">
+          <div className="modal">
+            <div className="modal-header">
+              <h3>Use a heart?</h3>
+              {renderHearts(me?.hearts ?? 0, "hearts-compact")}
+            </div>
+            <div className="modal-body">
+              <p className="note">
+                You rolled a 1. Use a heart to stay in the round?
+              </p>
+              <div className="modal-actions">
+                <button
+                  className="button primary"
+                  onClick={() => handleHeartDecision(true)}
+                >
+                  Use heart
+                </button>
+                <button
+                  className="button ghost"
+                  onClick={() => handleHeartDecision(false)}
+                >
+                  Take the bust
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {kickPrompt && (
+        <div className="modal-scrim" onClick={cancelKick}>
+          <div
+            className="modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3>Kick player?</h3>
+              <button className="modal-close" onClick={cancelKick}>
+                Close
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="note">
+                Remove {kickPrompt.name} from the room?
+              </p>
+              <div className="modal-actions two-column">
+                <button className="button ghost" onClick={cancelKick}>
+                  Cancel
+                </button>
+                <button className="button danger" onClick={confirmKick}>
+                  Kick
+                </button>
+              </div>
             </div>
           </div>
         </div>
