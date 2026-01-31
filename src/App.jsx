@@ -539,7 +539,7 @@ function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="modal-header">
-              <h3>Round {rollModal.round} simulated rolls</h3>
+              <h3>Round {rollModal.round} roll history</h3>
               <button className="modal-close" onClick={closeRollModal}>
                 Close
               </button>
@@ -550,16 +550,32 @@ function App() {
                   <div className="roll-group">
                     <div className="roll-group-header">
                       <span className="roll-group-title">Actual rolls</span>
-                      <span className="roll-group-badge actual">Live</span>
                     </div>
-                    <div className="roll-sequence">
+                    <div className="roll-table">
+                      <div className="roll-row roll-header">
+                        <span>#</span>
+                        <span>Roll</span>
+                        <span>Type</span>
+                        <span>Flag</span>
+                      </div>
                       {rollModal.actualSequence.map((roll, index) => (
-                        <span
+                        <div
                           key={`actual-${roll}-${index}`}
-                          className={`roll-pill${roll === 1 ? " bust" : ""}`}
+                          className="roll-row"
                         >
-                          {roll}
-                        </span>
+                          <span>{index + 1}</span>
+                          <span
+                            className={`roll-cell${roll === 1 ? " bust" : ""}`}
+                          >
+                            {roll}
+                          </span>
+                          <span>Actual</span>
+                          <span>
+                            {rollModal.bankIndex === index + 1 && (
+                              <span className="roll-flag">You banked</span>
+                            )}
+                          </span>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -569,18 +585,28 @@ function App() {
                   <div className="roll-group">
                     <div className="roll-group-header">
                       <span className="roll-group-title">Simulated rolls</span>
-                      <span className="roll-group-badge simulated">
-                        Hypothetical
-                      </span>
                     </div>
-                    <div className="roll-sequence">
+                    <div className="roll-table">
+                      <div className="roll-row roll-header">
+                        <span>#</span>
+                        <span>Roll</span>
+                        <span>Type</span>
+                        <span>Flag</span>
+                      </div>
                       {rollModal.simulatedSequence.map((roll, index) => (
-                        <span
+                        <div
                           key={`sim-${roll}-${index}`}
-                          className={`roll-pill${roll === 1 ? " bust" : ""}`}
+                          className="roll-row"
                         >
-                          {roll}
-                        </span>
+                          <span>{index + 1}</span>
+                          <span
+                            className={`roll-cell${roll === 1 ? " bust" : ""}`}
+                          >
+                            {roll}
+                          </span>
+                          <span>Simulated</span>
+                          <span />
+                        </div>
                       ))}
                     </div>
                   </div>

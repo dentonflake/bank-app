@@ -135,6 +135,7 @@ const startRound = (room, roundNumber) => {
       player.banked = false;
     }
     player.roundPoints = 0;
+    player.roundBankIndex = null;
     player.participatedInRound = player.connected;
   });
   room.currentTurnIndex = firstEligibleUnbankedIndex(room);
@@ -178,10 +179,12 @@ const endRound = (room, reason) => {
         simulatedRolls,
         simulatedSequence,
         actualSequence,
+        bankIndex: player.roundBankIndex,
       },
       ...(player.roundHistory || []),
     ].slice(0, 10);
     player.roundPoints = 0;
+    player.roundBankIndex = null;
     player.participatedInRound = false;
   });
 
@@ -266,6 +269,7 @@ const createRoom = ({ hostId, hostName, totalRounds }) => {
         token: hostToken,
         roundHistory: [],
         roundPoints: 0,
+        roundBankIndex: null,
         participatedInRound: true,
       },
     ],
@@ -387,6 +391,7 @@ io.on("connection", (socket) => {
       token: token || makePlayerToken(),
       roundHistory: [],
       roundPoints: 0,
+      roundBankIndex: null,
       participatedInRound: false,
     };
 
@@ -471,6 +476,7 @@ io.on("connection", (socket) => {
       player.score = 0;
       player.roundHistory = [];
       player.roundPoints = 0;
+      player.roundBankIndex = null;
       player.participatedInRound = false;
     });
     startRound(room, 1);
@@ -494,6 +500,7 @@ io.on("connection", (socket) => {
       player.score = 0;
       player.roundHistory = [];
       player.roundPoints = 0;
+      player.roundBankIndex = null;
       player.participatedInRound = false;
     });
     startRound(room, 1);
@@ -519,6 +526,7 @@ io.on("connection", (socket) => {
     player.score += room.pot;
     player.banked = true;
     player.roundPoints = room.pot;
+    player.roundBankIndex = room.roundRollSequence.length;
     room.lastEvent = `${player.name} banked ${room.pot} points.`;
 
     if (!hasEligibleUnbanked(room)) {

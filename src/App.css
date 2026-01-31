@@ -545,6 +545,12 @@ input::placeholder {
   padding: 1.5rem;
 }
 
+.modal-body {
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -568,12 +574,6 @@ input::placeholder {
   font-weight: 600;
 }
 
-.roll-sequence {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
 .roll-group {
   display: grid;
   gap: 0.75rem;
@@ -595,42 +595,84 @@ input::placeholder {
   font-weight: 700;
 }
 
-.roll-group-badge {
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
+
+.roll-table {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.roll-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.2rem;
+  align-items: center;
+  padding: 0.45rem 0.6rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 0.95rem;
+}
+
+.roll-row > span {
+  flex: 1;
+}
+
+.roll-row > span:nth-child(1) {
+  text-align: left;
+  max-width: 60px;
+}
+
+.roll-row > span:nth-child(2) {
+  text-align: center;
+  max-width: 90px;
+}
+
+.roll-row > span:nth-child(3) {
+  text-align: center;
+  max-width: 120px;
+}
+
+.roll-row > span:nth-child(4) {
+  text-align: right;
+}
+
+.roll-row.roll-header {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
   text-transform: uppercase;
-  padding: 0.25rem 0.6rem;
-  border-radius: 999px;
+  letter-spacing: 0.12em;
   font-weight: 600;
 }
 
-.roll-group-badge.actual {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--ink);
-  border: 1px solid var(--outline);
-}
-
-.roll-group-badge.simulated {
-  background: rgba(212, 175, 55, 0.16);
-  color: var(--accent);
-  border: 1px solid rgba(212, 175, 55, 0.35);
-}
-
-.roll-pill {
+.roll-cell {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 34px;
-  padding: 0.35rem 0.6rem;
+  padding: 0.25rem 0.6rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--ink);
   font-weight: 600;
 }
 
-.roll-pill.bust {
+.roll-cell.bust {
   background: rgba(220, 70, 70, 0.2);
   color: #ffffff;
+}
+
+.roll-flag {
+  display: inline-flex;
+  margin-left: 0.5rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(212, 175, 55, 0.14);
+  border: 1px solid rgba(212, 175, 55, 0.35);
 }
 
 .history-empty {
