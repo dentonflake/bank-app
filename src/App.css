@@ -75,6 +75,10 @@
   padding: 2rem;
 }
 
+.panel-body h2 {
+  margin-top: 0;
+}
+
 .home-panel {
   position: relative;
   overflow: hidden;
@@ -377,6 +381,7 @@ input::placeholder {
   font-size: 1.6rem;
   font-weight: 700;
   margin: 0.2rem 0 0;
+  text-transform: uppercase;
 }
 
 .dice-wrap {
@@ -526,6 +531,24 @@ input::placeholder {
   text-decoration: underline;
 }
 
+.round-history-toggle {
+  margin: 0.8rem auto 0;
+  background: transparent;
+  border: 1px solid var(--outline);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: block;
+  width: fit-content;
+}
+
+.round-history-toggle:hover {
+  border-color: rgba(212, 175, 55, 0.4);
+  color: var(--accent);
+}
+
 .intermission {
   margin-top: 1.5rem;
   padding: 1.2rem 1.4rem;
@@ -539,6 +562,7 @@ input::placeholder {
   display: grid;
   gap: 1rem;
 }
+
 
 .intermission-header {
   display: grid;
@@ -558,11 +582,14 @@ input::placeholder {
 }
 
 .intermission-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
+.intermission-ready {
+  width: 100%;
+}
 .modal-scrim {
   position: fixed;
   inset: 0;
@@ -571,6 +598,81 @@ input::placeholder {
   place-items: center;
   z-index: 20;
   padding: 1.5rem;
+}
+
+.win-card {
+  position: relative;
+  z-index: 2;
+  padding: 2.2rem 2.6rem;
+  border-radius: 22px;
+  border: 1px solid rgba(212, 175, 55, 0.5);
+  background: rgba(12, 12, 12, 0.92);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+
+.win-card-top {
+  margin: 0 0 1.5rem;
+  overflow: hidden;
+}
+
+.win-panel-body {
+  position: relative;
+  text-align: center;
+  padding: 2.5rem 2.6rem;
+  width: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+
+.win-title {
+  margin: 0;
+  font-size: clamp(2.4rem, 6vw, 4.2rem);
+  color: var(--accent);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.win-score {
+  margin: 0;
+  font-size: clamp(2.2rem, 4vw, 3rem);
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.2;
+  padding-bottom: 0.6rem;
+}
+
+.win-restart {
+  margin-top: 0.2rem;
+}
+
+.win-panel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(212, 175, 55, 0.65);
+  box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.25),
+    0 18px 40px rgba(0, 0, 0, 0.6);
+  animation: win-glow 2.6s ease-in-out infinite;
+  display: flex;
+}
+
+@keyframes win-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.25),
+      0 18px 40px rgba(0, 0, 0, 0.6),
+      0 0 20px rgba(212, 175, 55, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.4),
+      0 18px 40px rgba(0, 0, 0, 0.6),
+      0 0 32px rgba(212, 175, 55, 0.45);
+  }
 }
 
 .modal {
@@ -755,6 +857,7 @@ input::placeholder {
 .player-name {
   font-weight: 700;
   margin: 0;
+  text-transform: uppercase;
 }
 
 .player-meta {
@@ -782,6 +885,20 @@ input::placeholder {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.player-icon-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.player-icon-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  font-weight: 600;
 }
 
 .player-subrow-right {
@@ -813,6 +930,7 @@ input::placeholder {
   background: rgba(59, 178, 115, 0.18);
   color: #7de0b0;
 }
+
 
 .player-score {
   display: flex;
@@ -902,6 +1020,40 @@ input::placeholder {
   color: rgba(255, 255, 255, 0.2);
 }
 
+.bolt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.bolt-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bolt-compact .bolt-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.bolt-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.bolt-icon.filled {
+  color: var(--accent);
+  filter: drop-shadow(0 2px 6px rgba(212, 175, 55, 0.5));
+}
+
+.bolt-icon.empty {
+  color: rgba(255, 255, 255, 0.25);
+}
+
 @media (max-width: 900px) {
   .choice-grid {
     grid-template-columns: 1fr;
@@ -930,4 +1082,7 @@ input::placeholder {
   .button-row {
     flex-direction: column;
   }
+}
+.intermission-scrim {
+  z-index: 30;
 }

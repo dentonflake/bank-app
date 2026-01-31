@@ -32,6 +32,23 @@ const renderHearts = (count, className = "") => (
   </div>
 );
 
+const renderBolt = (hasMultiplier, className = "") => (
+  <div
+    className={`bolt ${className}`.trim()}
+    role="img"
+    aria-label={`2x multiplier ${hasMultiplier ? "owned" : "not owned"}`}
+  >
+    <span
+      className={`bolt-icon ${hasMultiplier ? "filled" : "empty"}`}
+      aria-hidden="true"
+    >
+      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+        <path d="M13.8 2L5 13.4h5.1L9.7 22 19 10.6h-5.2L13.8 2z" />
+      </svg>
+    </span>
+  </div>
+);
+
 const readSession = () => {
   try {
     const raw = localStorage.getItem(sessionKey);
@@ -78,12 +95,14 @@ function App() {
   const [error, setError] = useState("");
   const [rollModal, setRollModal] = useState(null);
   const [kickPrompt, setKickPrompt] = useState(null);
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const [playerToken] = useState(() => getPlayerToken());
   const rollAudioRef = useRef(null);
   const bankAudioRef = useRef(null);
   const thudAudioRef = useRef(null);
   const lastEventRef = useRef("");
   const lastBustIdRef = useRef(0);
+  const lastFinishedRef = useRef(false);
 
   useEffect(() => {
     const session = readSession();
@@ -166,6 +185,14 @@ function App() {
     return room.players.find((player) => player.id === socketId) || null;
   }, [room, socketId]);
 
+  const winners = useMemo(() => {
+    if (!room?.players || room.players.length === 0) {
+      return [];
+    }
+    const topScore = Math.max(...room.players.map((player) => player.score));
+    return room.players.filter((player) => player.score === topScore);
+  }, [room]);
+
   useEffect(() => {
     if (room && me) {
       writeSession({
@@ -184,6 +211,18 @@ function App() {
       lastEventRef.current = room.lastEvent;
     }
   }, [room]);
+
+  useEffect(() => {
+    if (!room) {
+      return;
+    }
+    const finished = Boolean(room.finished);
+    if (finished && !lastFinishedRef.current) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    lastFinishedRef.current = finished;
+  }, [room]);
+
 
   useEffect(() => {
     if (!room || !socketId) {
@@ -223,6 +262,15 @@ function App() {
     isMyTurn &&
     me?.eligible &&
     !me?.banked;
+  const canUseMultiplier =
+    gameStarted &&
+    !gameFinished &&
+    !room?.rolling &&
+    !roundEnded &&
+    !waitingOnHeart &&
+    me?.eligible &&
+    !me?.banked &&
+    me?.hasMultiplier;
   const showHeartPrompt = room?.pendingHeartPlayerId === socketId;
 
   const handleCreateRoom = () => {
@@ -271,12 +319,16 @@ function App() {
     socket.emit("game:bank");
   };
 
+  const handleUseMultiplier = () => {
+    socket.emit("multiplier:use");
+  };
+
   const handleReady = () => {
     socket.emit("round:ready");
   };
 
-  const handleBuyHeart = () => {
-    socket.emit("heart:buy");
+  const handleBuyItem = (itemId) => {
+    socket.emit("shop:buy", { itemId });
   };
 
   const handleHeartDecision = (useHeart) => {
@@ -446,137 +498,123 @@ function App() {
               <span>Leave room</span>
             </button>
           </div>
-
           <div className="grid">
-            <div className="panel main-panel">
-              <div className="panel-body">
-              <div className="room-meta">
-                <div>
-                    <p className="eyebrow">Room code</p>
-                  <h2>{room.id}</h2>
-                </div>
-                <div>
-                  <p className="eyebrow">Rounds</p>
-                  <h3>
-                    {room.currentRound || 0}/{room.totalRounds}
-                  </h3>
-                </div>
-              </div>
-
-              <div className="pot-highlight">
-                <div>
-                  <p className="label">Pot</p>
-                  <p className="pot-value">{formatPot(room.pot)}</p>
-                </div>
-              </div>
-
-              <div className="info-block">
-                <div>
-                  <p className="label">Turn</p>
-                  <p className="value">
-                    {currentPlayer ? currentPlayer.name : "—"}
+            {gameFinished && winners.length > 0 ? (
+              <div className="panel main-panel win-panel">
+                <div className="panel-body win-panel-body">
+                  <p className="eyebrow">Winner</p>
+                  <h2 className="win-title">
+                    {winners.length === 1
+                      ? winners[0].name
+                      : winners.map((winner) => winner.name).join(" & ")}
+                  </h2>
+                  <p className="win-score">
+                    {formatPot(winners[0]?.score ?? 0)}
                   </p>
+                  {isHost && (
+                    <button
+                      className="button primary win-restart"
+                      onClick={handleRestart}
+                    >
+                      Restart game
+                    </button>
+                  )}
                 </div>
               </div>
-
-              <div className="dice-wrap">
-                <div
-                  className={`dice${room.rolling ? " rolling" : ""}`}
-                >
-                  {room.lastRoll ?? "?"}
-                </div>
-                <p className="last-event">
-                  {room.lastEvent || "Waiting for the first roll."}
-                </p>
-              </div>
-
-              <div className="controls">
-                {gameStarted ? (
-                  <>
-                    <button
-                      className="button primary"
-                      onClick={handleRoll}
-                      disabled={!canRoll}
-                    >
-                      {isMyTurn ? "Roll" : "Waiting"}
-                    </button>
-                    <button
-                      className="button ghost"
-                      onClick={handleBank}
-                      disabled={!canBank}
-                    >
-                      Bank
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    {isHost ? (
-                      <button className="button primary" onClick={handleStart}>
-                        Start game
-                      </button>
-                    ) : (
-                      <p className="waiting">Waiting for host to start…</p>
-                    )}
-                  </>
-                )}
-
-                {gameFinished && isHost && (
-                  <button className="button primary" onClick={handleRestart}>
-                    Restart game
-                  </button>
-                )}
-              </div>
-
-              {gameStarted && !gameFinished && roundEnded && (
-                <div className="intermission">
-                  <div className="intermission-header">
+            ) : (
+              <div className="panel main-panel">
+                <div className="panel-body">
+                  <div className="room-meta">
                     <div>
-                      <p className="label">End of round</p>
-                      <p className="intermission-title">
-                        Ready up for round {room.currentRound + 1}
+                      <p className="eyebrow">Room code</p>
+                      <h2>{room.id}</h2>
+                    </div>
+                    <div>
+                      <p className="eyebrow">Rounds</p>
+                      <h3>
+                        {room.currentRound || 0}/{room.totalRounds}
+                      </h3>
+                    </div>
+                  </div>
+
+                  <div className="pot-highlight">
+                    <div>
+                      <p className="label">Pot</p>
+                      <p className="pot-value">{formatPot(room.pot)}</p>
+                    </div>
+                  </div>
+
+                  <div className="info-block">
+                    <div>
+                      <p className="label">Turn</p>
+                      <p className="value">
+                        {currentPlayer ? currentPlayer.name : "—"}
                       </p>
                     </div>
-                    <div className="intermission-meta">
-                      <div>
-                        <p className="label">Balance</p>
-                        <p className="value">{formatPot(me?.score ?? 0)}</p>
-                      </div>
-                      <div>
-                        <p className="label">Hearts</p>
-                        {renderHearts(me?.hearts ?? 0, "hearts-compact")}
-                      </div>
-                    </div>
                   </div>
-                  <div className="intermission-actions">
-                    <button
-                      className="button ghost"
-                      onClick={handleBuyHeart}
-                      disabled={(me?.hearts ?? 0) >= 3 || (me?.score ?? 0) < 100}
-                    >
-                      Buy heart ($100)
-                    </button>
-                    <button
-                      className="button primary"
-                      onClick={handleReady}
-                      disabled={me?.readyForNextRound}
-                    >
-                      {me?.readyForNextRound ? "Ready" : "Ready up"}
-                    </button>
-                  </div>
-                  <p className="note">
-                    Everyone must be ready to continue the next round.
-                  </p>
-                </div>
-              )}
 
-              {me && !me.eligible && gameStarted && !gameFinished && !roundEnded && (
-                <p className="note">
-                  You joined mid-round. You’ll be eligible next round.
-                </p>
-              )}
-              {error && <p className="error">{error}</p>}
-            </div>
-          </div>
+                  <div className="dice-wrap">
+                    <div
+                      className={`dice${room.rolling ? " rolling" : ""}`}
+                    >
+                      {room.lastRoll ?? "?"}
+                    </div>
+                    <p className="last-event">
+                      {room.lastEvent || "Waiting for the first roll."}
+                    </p>
+                  </div>
+
+                  <div className="controls">
+                    {gameStarted ? (
+                      <>
+                        <button
+                          className="button primary"
+                          onClick={handleRoll}
+                          disabled={!canRoll}
+                        >
+                          {isMyTurn ? "Roll" : "Waiting"}
+                        </button>
+                        <button
+                          className="button ghost"
+                          onClick={handleUseMultiplier}
+                          disabled={!canUseMultiplier}
+                        >
+                          Use 2x
+                        </button>
+                        <button
+                          className="button ghost"
+                          onClick={handleBank}
+                          disabled={!canBank}
+                        >
+                          Bank
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {isHost ? (
+                          <button className="button primary" onClick={handleStart}>
+                            Start game
+                          </button>
+                        ) : (
+                          <p className="waiting">Waiting for host to start…</p>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {me &&
+                    !me.eligible &&
+                    gameStarted &&
+                    !gameFinished &&
+                    !roundEnded && (
+                      <p className="note">
+                        You joined mid-round. You’ll be eligible next round.
+                      </p>
+                    )}
+                  {error && <p className="error">{error}</p>}
+                </div>
+              </div>
+            )}
             <div className="panel players-panel">
               <div className="panel-body">
                 <h2>Players</h2>
@@ -619,7 +657,14 @@ function App() {
                         <div className="player-divider" />
                         <div className="player-subrow">
                           <div className="player-subrow-left">
-                            {renderHearts(player.hearts ?? 0)}
+                            <div className="player-icon-group">
+                              <span className="player-icon-label">Hearts</span>
+                              {renderHearts(player.hearts ?? 0)}
+                            </div>
+                            <div className="player-icon-group">
+                              <span className="player-icon-label">2x</span>
+                              {renderBolt(Boolean(player.hasMultiplier))}
+                            </div>
                           </div>
                           <div className="player-subrow-right">
                             {gameStarted && isCurrent && !player.banked && (
@@ -649,7 +694,10 @@ function App() {
                 <h2>Round history</h2>
                 {me?.roundHistory && me.roundHistory.length > 0 ? (
                   <ul className="round-history">
-                    {me.roundHistory.slice(0, 5).map((entry) => (
+                    {(showAllHistory
+                      ? me.roundHistory
+                      : me.roundHistory.slice(0, 3)
+                    ).map((entry) => (
                       <li key={entry.id} className="round-history-item">
                         <div className="round-history-header">
                           <span className="round-history-title">
@@ -677,6 +725,15 @@ function App() {
                   </ul>
                 ) : (
                   <p className="history-empty">No rounds yet.</p>
+                )}
+                {me?.roundHistory && me.roundHistory.length > 3 && (
+                  <button
+                    className="round-history-toggle"
+                    type="button"
+                    onClick={() => setShowAllHistory((prev) => !prev)}
+                  >
+                    {showAllHistory ? "Show less" : "Show more"}
+                  </button>
                 )}
               </div>
             </div>
@@ -783,6 +840,71 @@ function App() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+      {gameStarted && !gameFinished && roundEnded && (
+        <div className="modal-scrim intermission-scrim">
+          <div className="modal intermission">
+            <div className="intermission-header">
+              <div>
+                <p className="label">End of round</p>
+                <p className="intermission-title">
+                  Ready up for round {room.currentRound + 1}
+                </p>
+              </div>
+              <div className="intermission-meta">
+                <div>
+                  <p className="label">Balance</p>
+                  <p className="value">{formatPot(me?.score ?? 0)}</p>
+                </div>
+                <div>
+                  <p className="label">Hearts</p>
+                  {renderHearts(me?.hearts ?? 0, "hearts-compact")}
+                </div>
+                <div>
+                  <p className="label">2x Multiplier</p>
+                  {renderBolt(Boolean(me?.hasMultiplier), "bolt-compact")}
+                </div>
+              </div>
+            </div>
+            <div className="intermission-actions">
+              {(room?.shop ?? []).map((item) => {
+                const ownedCount =
+                  item.id === "heart"
+                    ? me?.hearts ?? 0
+                    : item.id === "multiplier"
+                    ? me?.hasMultiplier
+                      ? 1
+                      : 0
+                    : 0;
+                const isMaxed =
+                  typeof item.maxOwned === "number" &&
+                  ownedCount >= item.maxOwned;
+                const isAffordable = (me?.score ?? 0) >= item.price;
+                return (
+                  <button
+                    key={item.id}
+                    className="button ghost"
+                    onClick={() => handleBuyItem(item.id)}
+                    disabled={isMaxed || !isAffordable}
+                    title={item.description}
+                  >
+                    {item.label} (${item.price})
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              className="button primary intermission-ready"
+              onClick={handleReady}
+              disabled={me?.readyForNextRound}
+            >
+              {me?.readyForNextRound ? "Ready" : "Ready up"}
+            </button>
+            <p className="note">
+              Everyone must be ready to continue the next round.
+            </p>
           </div>
         </div>
       )}
