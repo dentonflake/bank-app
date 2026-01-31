@@ -34,7 +34,7 @@ const shopCatalog = [
     id: "multiplier",
     label: "2x Multiplier",
     description: "Instantly double the pot once per round.",
-    price: 5,
+    price: 250,
     maxOwned: 1,
   },
 ];
@@ -840,12 +840,12 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if (player.score < 5) {
+    if (player.score < 250) {
       socket.emit("room:error", "Not enough funds to buy a 2x multiplier.");
       return;
     }
 
-    player.score -= 5;
+    player.score -= 250;
     player.hasMultiplier = true;
     room.lastEvent = `${player.name} bought a 2x multiplier.`;
     emitRoom(room);

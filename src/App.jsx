@@ -268,6 +268,7 @@ function App() {
     !room?.rolling &&
     !roundEnded &&
     !waitingOnHeart &&
+    (room?.pot ?? 0) > 0 &&
     me?.eligible &&
     !me?.banked &&
     me?.hasMultiplier;
