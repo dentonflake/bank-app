@@ -5,15 +5,29 @@ import { Server } from "socket.io";
 
 const app = express();
 const httpServer = createServer(app);
+const defaultAllowedOrigins = [
+  "https://bank.dentonflake.com",
+  "http://localhost:5173",
+];
 const allowedOrigins = (process.env.CORS_ORIGIN ||
-  "https://bank.dentonflake.com,http://localhost:5173")
+  defaultAllowedOrigins.join(","))
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const ngrokOriginPattern = /^https:\/\/[a-z0-9-]+\.ngrok-free\.dev$/i;
+const isAllowedOrigin = (origin) => {
+  if (!origin) {
+    return true;
+  }
+  if (allowedOrigins.includes(origin)) {
+    return true;
+  }
+  return ngrokOriginPattern.test(origin);
+};
 
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins,
+    origin: isAllowedOrigin,
     methods: ["GET", "POST"],
   },
 });
@@ -1091,7 +1105,11 @@ app.get("/", (_req, res) => {
   res.send("Bank server is running.");
 });
 
-const PORT = process.env.PORT || 3000;
+app.get("/health", (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
+const PORT = process.env.PORT || 80;
 const HOST = process.env.HOST || "0.0.0.0";
 httpServer.listen(PORT, HOST, () => {
   console.log(`Bank server listening on http://${HOST}:${PORT}`);

@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import "./App.css";
 
-const serverUrl = import.meta.env.VITE_SERVER_URL || "http://localhost:3000";
+const serverUrl = import.meta.env.VITE_SERVER_URL;
 const sessionKey = "bank-session";
 const tokenKey = "bank-player-token";
 
 const socket = io(serverUrl, {
   autoConnect: false,
+  transports: ["websocket", "polling"],
 });
 
 const emptyNameMessage = "Enter your name to continue.";
@@ -142,8 +143,18 @@ function App() {
       setSocketId("");
     };
 
+    const handleConnectError = (err) => {
+      setConnected(false);
+      const message = err?.message
+        ? `Connection error: ${err.message}`
+        : "Connection error: unknown";
+      setError(message);
+      setTimeout(() => setError(""), 4000);
+    };
+
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleConnectError);
     socket.on("room:state", (nextRoom) => {
       setRoom(nextRoom);
     });
@@ -166,6 +177,7 @@ function App() {
     return () => {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleConnectError);
       socket.off("room:state");
       socket.off("room:error");
       socket.off("room:kicked");
