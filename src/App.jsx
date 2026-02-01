@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import "./App.css";
 
-const serverUrl = import.meta.env.VITE_SERVER_URL || "http://localhost:3000";
+const serverUrl = import.meta.env.VITE_SERVER_URL || "http://work.local:3000";
 const sessionKey = "bank-session";
 const tokenKey = "bank-player-token";
 

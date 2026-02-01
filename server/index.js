@@ -6,7 +6,7 @@ import { Server } from "socket.io";
 const app = express();
 const httpServer = createServer(app);
 const allowedOrigins = (process.env.CORS_ORIGIN ||
-  "https://bank.dentonflake.com,http://localhost:5173")
+  "https://bank.dentonflake.com,http://localhost:5173,http://work.local:5173")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
