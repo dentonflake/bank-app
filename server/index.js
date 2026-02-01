@@ -282,7 +282,7 @@ const handleHeartChoiceRound = (room, bustingPlayerName) => {
   room.lastEvent = `${bustingPlayerName} rolled a 1 — heart decision.`;
 
   if (heartPlayers.length === 0) {
-    endRound(room, "bust");
+    endRound(room, "bust", { preserveLastBust: bootedPlayers.length > 0 });
     emitRoom(room);
     return;
   }
