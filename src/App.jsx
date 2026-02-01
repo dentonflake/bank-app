@@ -12,13 +12,13 @@ const socket = io(serverUrl, {
 
 const emptyNameMessage = "Enter your name to continue.";
 const formatPot = (value) => `$${value ?? 0}`;
-const renderHearts = (count, className = "") => (
+const renderHearts = (count, className = "", maxHearts = 3) => (
   <div
     className={`hearts ${className}`.trim()}
     role="img"
-    aria-label={`Hearts ${count ?? 0} of 3`}
+    aria-label={`Hearts ${count ?? 0} of ${maxHearts}`}
   >
-    {[0, 1, 2].map((index) => (
+    {Array.from({ length: maxHearts }).map((_, index) => (
       <span
         key={`heart-${index}`}
         className={`heart ${index < (count ?? 0) ? "filled" : "empty"}`}
@@ -32,22 +32,29 @@ const renderHearts = (count, className = "") => (
   </div>
 );
 
-const renderBolt = (hasMultiplier, className = "") => (
-  <div
-    className={`bolt ${className}`.trim()}
-    role="img"
-    aria-label={`2x multiplier ${hasMultiplier ? "owned" : "not owned"}`}
-  >
-    <span
-      className={`bolt-icon ${hasMultiplier ? "filled" : "empty"}`}
-      aria-hidden="true"
+const renderBolt = (count, className = "", maxMultipliers = 1) => {
+  const amount = Number(count ?? 0);
+  const hasMultiplier = amount > 0;
+  return (
+    <div
+      className={`bolt ${className}`.trim()}
+      role="img"
+      aria-label={`2x multiplier ${amount} of ${maxMultipliers}`}
     >
-      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-        <path d="M13.8 2L5 13.4h5.1L9.7 22 19 10.6h-5.2L13.8 2z" />
-      </svg>
-    </span>
-  </div>
-);
+      {Array.from({ length: maxMultipliers }).map((_, index) => (
+        <span
+          key={`bolt-${index}`}
+          className={`bolt-icon ${index < amount ? "filled" : "empty"}`}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+            <path d="M13.8 2L5 13.4h5.1L9.7 22 19 10.6h-5.2L13.8 2z" />
+          </svg>
+        </span>
+      ))}
+    </div>
+  );
+};
 
 const readSession = () => {
   try {
@@ -91,6 +98,10 @@ function App() {
   const [name, setName] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [roundsInput, setRoundsInput] = useState(10);
+  const [heartPrice, setHeartPrice] = useState(100);
+  const [heartMax, setHeartMax] = useState(3);
+  const [multiplierPrice, setMultiplierPrice] = useState(250);
+  const [multiplierMax, setMultiplierMax] = useState(1);
   const [homeMode, setHomeMode] = useState(null);
   const [error, setError] = useState("");
   const [rollModal, setRollModal] = useState(null);
@@ -193,6 +204,16 @@ function App() {
     return room.players.filter((player) => player.score === topScore);
   }, [room]);
 
+  const maxHearts = useMemo(() => {
+    const item = room?.shop?.find((entry) => entry.id === "heart");
+    return typeof item?.maxOwned === "number" ? item.maxOwned : 3;
+  }, [room]);
+
+  const maxMultipliers = useMemo(() => {
+    const item = room?.shop?.find((entry) => entry.id === "multiplier");
+    return typeof item?.maxOwned === "number" ? item.maxOwned : 1;
+  }, [room]);
+
   useEffect(() => {
     if (room && me) {
       writeSession({
@@ -271,7 +292,7 @@ function App() {
     (room?.pot ?? 0) > 0 &&
     me?.eligible &&
     !me?.banked &&
-    me?.hasMultiplier;
+    (me?.multiplierCount ?? 0) > 0;
   const showHeartPrompt = room?.pendingHeartPlayerId === socketId;
 
   const handleCreateRoom = () => {
@@ -283,6 +304,10 @@ function App() {
       name: name.trim(),
       totalRounds: roundsInput,
       token: playerToken,
+      heartPrice,
+      heartMax,
+      multiplierPrice,
+      multiplierMax,
     });
   };
 
@@ -425,18 +450,68 @@ function App() {
                     />
                   </label>
                   {homeMode === "create" ? (
-                    <label>
-                      Total rounds
-                      <input
-                        type="number"
-                        min={1}
-                        max={50}
-                        value={roundsInput}
-                        onChange={(event) =>
-                          setRoundsInput(Number(event.target.value))
-                        }
-                      />
-                    </label>
+                    <>
+                      <label>
+                        Total rounds
+                        <input
+                          type="number"
+                          min={1}
+                          max={50}
+                          value={roundsInput}
+                          onChange={(event) =>
+                            setRoundsInput(Number(event.target.value))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Heart price
+                        <input
+                          type="number"
+                          min={1}
+                          max={10000}
+                          value={heartPrice}
+                          onChange={(event) =>
+                            setHeartPrice(Number(event.target.value))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Max hearts (1-3)
+                        <input
+                          type="number"
+                          min={1}
+                          max={3}
+                          value={heartMax}
+                          onChange={(event) =>
+                            setHeartMax(Number(event.target.value))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Multiplier price
+                        <input
+                          type="number"
+                          min={1}
+                          max={10000}
+                          value={multiplierPrice}
+                          onChange={(event) =>
+                            setMultiplierPrice(Number(event.target.value))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Max multipliers (1-3)
+                        <input
+                          type="number"
+                          min={1}
+                          max={3}
+                          value={multiplierMax}
+                          onChange={(event) =>
+                            setMultiplierMax(Number(event.target.value))
+                          }
+                        />
+                      </label>
+                    </>
                   ) : (
                     <label>
                       Room code
@@ -496,7 +571,7 @@ function App() {
                   strokeLinejoin="round"
                 />
               </svg>
-              <span>Leave room</span>
+              <span>Leave</span>
             </button>
           </div>
           <div className="grid">
@@ -660,26 +735,29 @@ function App() {
                           <div className="player-subrow-left">
                             <div className="player-icon-group">
                               <span className="player-icon-label">Hearts</span>
-                              {renderHearts(player.hearts ?? 0)}
+                              {renderHearts(
+                                player.hearts ?? 0,
+                                "",
+                                maxHearts
+                              )}
                             </div>
                             <div className="player-icon-group">
                               <span className="player-icon-label">2x</span>
-                              {renderBolt(Boolean(player.hasMultiplier))}
+                              {renderBolt(
+                                player.multiplierCount ?? 0,
+                                "",
+                                maxMultipliers
+                              )}
                             </div>
                           </div>
                           <div className="player-subrow-right">
                             {gameStarted && isCurrent && !player.banked && (
                               <span className="player-status">Rolling</span>
                             )}
-                            {roundEnded && player.readyForNextRound ? (
-                              <span className="player-status ready">Ready</span>
-                            ) : (
-                              gameStarted &&
-                              player.banked && (
-                                <span className="player-status banked">
-                                  Banked
-                                </span>
-                              )
+                            {gameStarted && player.banked && (
+                              <span className="player-status banked">
+                                Banked
+                              </span>
                             )}
                           </div>
                         </div>
@@ -792,7 +870,7 @@ function App() {
           <div className="modal">
             <div className="modal-header">
               <h3>Use a heart?</h3>
-              {renderHearts(me?.hearts ?? 0, "hearts-compact")}
+                  {renderHearts(me?.hearts ?? 0, "hearts-compact", maxHearts)}
             </div>
             <div className="modal-body">
               <p className="note">
@@ -817,7 +895,7 @@ function App() {
         </div>
       )}
       {kickPrompt && (
-        <div className="modal-scrim" onClick={cancelKick}>
+        <div className="modal-scrim kick-scrim" onClick={cancelKick}>
           <div
             className="modal"
             onClick={(event) => event.stopPropagation()}
@@ -847,26 +925,34 @@ function App() {
       {gameStarted && !gameFinished && roundEnded && (
         <div className="modal-scrim intermission-scrim">
           <div className="modal intermission">
-            <div className="intermission-header">
+            <div className="intermission-banner">
+              <p className="label">Round {room.currentRound} complete</p>
+              <h2 className="intermission-reason">
+                {room.lastEvent?.includes("busted on a 1")
+                  ? `${
+                      room.players.find(
+                        (player) => player.id === room.lastRollPlayerId
+                      )?.name || "Someone"
+                    } rolled a 1.`
+                  : "Everyone banked."}
+              </h2>
+            </div>
+            <div className="intermission-meta">
               <div>
-                <p className="label">End of round</p>
-                <p className="intermission-title">
-                  Ready up for round {room.currentRound + 1}
-                </p>
+                <p className="label">Balance</p>
+                <p className="value">{formatPot(me?.score ?? 0)}</p>
               </div>
-              <div className="intermission-meta">
-                <div>
-                  <p className="label">Balance</p>
-                  <p className="value">{formatPot(me?.score ?? 0)}</p>
-                </div>
-                <div>
-                  <p className="label">Hearts</p>
-                  {renderHearts(me?.hearts ?? 0, "hearts-compact")}
-                </div>
-                <div>
-                  <p className="label">2x Multiplier</p>
-                  {renderBolt(Boolean(me?.hasMultiplier), "bolt-compact")}
-                </div>
+              <div>
+                <p className="label">Hearts</p>
+                {renderHearts(me?.hearts ?? 0, "hearts-compact", maxHearts)}
+              </div>
+              <div>
+                <p className="label">2x Multiplier</p>
+                {renderBolt(
+                  me?.multiplierCount ?? 0,
+                  "bolt-compact",
+                  maxMultipliers
+                )}
               </div>
             </div>
             <div className="intermission-actions">
@@ -875,9 +961,7 @@ function App() {
                   item.id === "heart"
                     ? me?.hearts ?? 0
                     : item.id === "multiplier"
-                    ? me?.hasMultiplier
-                      ? 1
-                      : 0
+                    ? me?.multiplierCount ?? 0
                     : 0;
                 const isMaxed =
                   typeof item.maxOwned === "number" &&
@@ -903,6 +987,97 @@ function App() {
             >
               {me?.readyForNextRound ? "Ready" : "Ready up"}
             </button>
+            <button
+              className="button ghost intermission-leave"
+              onClick={handleLeaveRoom}
+            >
+              <svg
+                className="leave-icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path
+                  d="M10 6H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M16 16l4-4-4-4M20 12H9"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>Leave</span>
+            </button>
+            <div className="intermission-players">
+              <div className="intermission-players-header">
+                <div className="intermission-players-title">
+                  <p className="label">Players</p>
+                </div>
+                <p className="note">
+                  {
+                    room.players.filter(
+                      (player) => player.readyForNextRound
+                    ).length
+                  }
+                  /{room.players.length} ready
+                </p>
+              </div>
+              <ul className="intermission-list">
+                {room.players.map((player) => {
+                  const isReady = Boolean(player.readyForNextRound);
+                  const isSelf = player.id === socketId;
+                  return (
+                    <li
+                      key={`intermission-${player.id}`}
+                      className={`intermission-player ${
+                        isReady ? "ready" : "waiting"
+                      }`}
+                    >
+                      <div className="intermission-player-main">
+                        <span className="intermission-player-name">
+                          {player.name}
+                          {player.id === room.hostId ? " · Host" : ""}
+                          {isSelf ? " · You" : ""}
+                        </span>
+                        {!player.eligible && (
+                          <span className="intermission-player-tag">
+                            Next round
+                          </span>
+                        )}
+                      </div>
+                      <div className="intermission-player-actions">
+                        {isHost && player.id !== room.hostId && (
+                          <button
+                            className="button danger ghost compact"
+                            type="button"
+                            onClick={() =>
+                              handleKickPlayer(player.id, player.name)
+                            }
+                          >
+                            Kick
+                          </button>
+                        )}
+                        <span
+                          className={`intermission-player-status ${
+                            isReady ? "ready" : "waiting"
+                          }`}
+                        >
+                          {isReady ? "Ready" : "Waiting"}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
             <p className="note">
               Everyone must be ready to continue the next round.
             </p>

@@ -183,8 +183,8 @@
 
 .input-grid {
   display: grid;
-  gap: 1.25rem;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1.25rem 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   margin-bottom: 1.5rem;
 }
 
@@ -192,6 +192,7 @@ label {
   display: grid;
   gap: 0.4rem;
   font-weight: 500;
+  min-width: 0;
 }
 
 input {
@@ -201,6 +202,8 @@ input {
   background: rgba(10, 10, 10, 0.9);
   color: var(--ink);
   font-size: 1rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 input::placeholder {
@@ -550,7 +553,9 @@ input::placeholder {
 }
 
 .intermission {
-  margin-top: 1.5rem;
+  margin: 1.5rem auto;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
   padding: 1.2rem 1.4rem;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -563,6 +568,20 @@ input::placeholder {
   gap: 1rem;
 }
 
+.intermission-banner {
+  padding: 0;
+}
+
+.intermission-reason {
+  margin: 0.35rem 0 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.intermission-banner .note {
+  margin: 0;
+  opacity: 0.8;
+}
 
 .intermission-header {
   display: grid;
@@ -581,6 +600,98 @@ input::placeholder {
   gap: 1.5rem;
 }
 
+.intermission-players {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.intermission-players-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.intermission-players-title {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.intermission-players-title .note {
+  margin: 0;
+  opacity: 0.85;
+}
+
+.intermission-players-header .note {
+  margin: 0;
+  opacity: 0.8;
+}
+
+.intermission-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.intermission-player {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.intermission-player.ready {
+  border-color: rgba(91, 210, 127, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(91, 210, 127, 0.18);
+}
+
+.intermission-player-main {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.intermission-player-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.intermission-player-tag {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.intermission-player-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.intermission-player-status {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.intermission-player-status.ready {
+  color: #5bd27f;
+  border-color: rgba(91, 210, 127, 0.7);
+}
+
+.intermission-player-status.waiting {
+  color: rgba(255, 255, 255, 0.7);
+}
+
 .intermission-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -590,6 +701,26 @@ input::placeholder {
 .intermission-ready {
   width: 100%;
 }
+
+.intermission-leave {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.7rem 0.9rem;
+}
+
+.intermission-leave .leave-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.button.compact {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  border-radius: 999px;
+}
 .modal-scrim {
   position: fixed;
   inset: 0;
@@ -598,6 +729,7 @@ input::placeholder {
   place-items: center;
   z-index: 20;
   padding: 1.5rem;
+  overflow-y: auto;
 }
 
 .win-card {
@@ -882,9 +1014,10 @@ input::placeholder {
 }
 
 .player-subrow-left {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
 }
 
 .player-icon-group {
@@ -1085,4 +1218,8 @@ input::placeholder {
 }
 .intermission-scrim {
   z-index: 30;
+}
+
+.kick-scrim {
+  z-index: 40;
 }

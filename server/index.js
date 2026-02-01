@@ -22,22 +22,40 @@ const rooms = new Map();
 
 const rollDie = () => Math.floor(Math.random() * 6) + 1;
 
-const shopCatalog = [
-  {
-    id: "heart",
-    label: "Heart",
-    description: "Save yourself from a non-first-roll 1.",
-    price: 100,
-    maxOwned: 3,
-  },
-  {
-    id: "multiplier",
-    label: "2x Multiplier",
-    description: "Instantly double the pot once per round.",
-    price: 250,
-    maxOwned: 1,
-  },
-];
+const defaultShopConfig = {
+  maxHearts: 3,
+  heartPrice: 100,
+  maxMultipliers: 1,
+  multiplierPrice: 250,
+};
+
+const clampNumber = (value, min, max, fallback) => {
+  const num = Number(value);
+  if (Number.isNaN(num)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, num));
+};
+
+const buildShop = (room) => {
+  const config = room?.shopConfig || defaultShopConfig;
+  return [
+    {
+      id: "heart",
+      label: "Heart",
+      description: "Save yourself from a non-first-roll 1.",
+      price: config.heartPrice,
+      maxOwned: config.maxHearts,
+    },
+    {
+      id: "multiplier",
+      label: "2x Multiplier",
+      description: "Instantly double the pot once per round.",
+      price: config.multiplierPrice,
+      maxOwned: config.maxMultipliers,
+    },
+  ];
+};
 
 const makePlayerToken = () => crypto.randomUUID();
 
@@ -61,7 +79,7 @@ const toPublicRoom = (room) => ({
     eligible: player.eligible,
     connected: player.connected,
     hearts: player.hearts ?? 0,
-    hasMultiplier: player.hasMultiplier ?? false,
+    multiplierCount: player.multiplierCount ?? 0,
     readyForNextRound: player.readyForNextRound ?? false,
     roundHistory: player.roundHistory ?? [],
   })),
@@ -79,7 +97,7 @@ const toPublicRoom = (room) => ({
   pendingHeartPlayerId: room.pendingHeart?.playerId ?? null,
   lastBustId: room.lastBust?.id ?? 0,
   lastBustPlayerIds: room.lastBust?.playerIds ?? [],
-  shop: shopCatalog,
+  shop: buildShop(room),
   lastEvent: room.lastEvent ?? "",
 });
 
@@ -273,7 +291,7 @@ const ensureValidTurn = (room) => {
   }
 };
 
-const createRoom = ({ hostId, hostName, totalRounds }) => {
+const createRoom = ({ hostId, hostName, totalRounds, shopConfig }) => {
   let id = makeRoomId();
   while (rooms.has(id)) {
     id = makeRoomId();
@@ -297,10 +315,11 @@ const createRoom = ({ hostId, hostName, totalRounds }) => {
         roundBankIndex: null,
         participatedInRound: true,
         hearts: 0,
-        hasMultiplier: false,
+        multiplierCount: 0,
         readyForNextRound: false,
       },
     ],
+    shopConfig: shopConfig || { ...defaultShopConfig },
     started: false,
     finished: false,
     totalRounds: totalRounds || 10,
@@ -324,7 +343,17 @@ const createRoom = ({ hostId, hostName, totalRounds }) => {
 };
 
 io.on("connection", (socket) => {
-  socket.on("room:create", ({ name, totalRounds, token }) => {
+  socket.on(
+    "room:create",
+    ({
+      name,
+      totalRounds,
+      token,
+      heartPrice,
+      heartMax,
+      multiplierPrice,
+      multiplierMax,
+    }) => {
     if (!name) {
       socket.emit("room:error", "Name is required.");
       return;
@@ -334,6 +363,27 @@ io.on("connection", (socket) => {
       hostId: socket.id,
       hostName: name,
       totalRounds: Number(totalRounds) || 10,
+      shopConfig: {
+        maxHearts: clampNumber(heartMax, 1, 3, defaultShopConfig.maxHearts),
+        heartPrice: clampNumber(
+          heartPrice,
+          1,
+          10000,
+          defaultShopConfig.heartPrice
+        ),
+        maxMultipliers: clampNumber(
+          multiplierMax,
+          1,
+          3,
+          defaultShopConfig.maxMultipliers
+        ),
+        multiplierPrice: clampNumber(
+          multiplierPrice,
+          1,
+          10000,
+          defaultShopConfig.multiplierPrice
+        ),
+      },
     });
 
     const host = room.players.find((player) => player.id === socket.id);
@@ -428,7 +478,7 @@ io.on("connection", (socket) => {
       roundBankIndex: null,
       participatedInRound: false,
       hearts: 0,
-      hasMultiplier: false,
+      multiplierCount: 0,
       readyForNextRound: false,
     };
 
@@ -569,7 +619,7 @@ io.on("connection", (socket) => {
       player.roundBankIndex = null;
       player.participatedInRound = false;
       player.hearts = 0;
-      player.hasMultiplier = false;
+      player.multiplierCount = 0;
       player.readyForNextRound = false;
     });
     startRound(room, 1);
@@ -596,7 +646,7 @@ io.on("connection", (socket) => {
       player.roundBankIndex = null;
       player.participatedInRound = false;
       player.hearts = 0;
-      player.hasMultiplier = false;
+      player.multiplierCount = 0;
       player.readyForNextRound = false;
     });
     startRound(room, 1);
@@ -835,18 +885,21 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if (player.hasMultiplier) {
-      socket.emit("room:error", "You already have a 2x multiplier.");
+    const { multiplierPrice, maxMultipliers } =
+      room.shopConfig || defaultShopConfig;
+
+    if (player.multiplierCount >= maxMultipliers) {
+      socket.emit("room:error", "You already have the max multipliers.");
       return;
     }
 
-    if (player.score < 250) {
+    if (player.score < multiplierPrice) {
       socket.emit("room:error", "Not enough funds to buy a 2x multiplier.");
       return;
     }
 
-    player.score -= 250;
-    player.hasMultiplier = true;
+    player.score -= multiplierPrice;
+    player.multiplierCount += 1;
     room.lastEvent = `${player.name} bought a 2x multiplier.`;
     emitRoom(room);
   });
@@ -857,7 +910,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const item = shopCatalog.find((entry) => entry.id === itemId);
+    const item = buildShop(room).find((entry) => entry.id === itemId);
     if (!item) {
       return;
     }
@@ -885,12 +938,12 @@ io.on("connection", (socket) => {
     }
 
     if (item.id === "multiplier") {
-      if (player.hasMultiplier) {
-        socket.emit("room:error", "You already have a 2x multiplier.");
+      if (player.multiplierCount >= item.maxOwned) {
+        socket.emit("room:error", "You already have the max multipliers.");
         return;
       }
       player.score -= item.price;
-      player.hasMultiplier = true;
+      player.multiplierCount += 1;
       room.lastEvent = `${player.name} bought a 2x multiplier.`;
       emitRoom(room);
     }
@@ -907,11 +960,16 @@ io.on("connection", (socket) => {
     }
 
     const player = room.players.find((p) => p.id === socket.id);
-    if (!player || !player.eligible || player.banked || !player.hasMultiplier) {
+    if (
+      !player ||
+      !player.eligible ||
+      player.banked ||
+      player.multiplierCount <= 0
+    ) {
       return;
     }
 
-    player.hasMultiplier = false;
+    player.multiplierCount -= 1;
     room.pot = room.pot * 2;
     room.lastEvent = `${player.name} used a 2x multiplier — pot doubled.`;
     emitRoom(room);
