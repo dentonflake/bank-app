@@ -264,7 +264,8 @@ function App() {
   const gameStarted = Boolean(room?.started);
   const gameFinished = Boolean(room?.finished);
   const roundEnded = Boolean(room?.roundEnded);
-  const waitingOnHeart = Boolean(room?.pendingHeartPlayerId);
+  const showIntermission = gameStarted && !gameFinished && roundEnded;
+  const waitingOnHeart = (room?.pendingHeartPlayerIds ?? []).length > 0;
   const isMyTurn = currentPlayer?.id === socketId;
   const canBank =
     gameStarted &&
@@ -293,7 +294,7 @@ function App() {
     me?.eligible &&
     !me?.banked &&
     (me?.multiplierCount ?? 0) > 0;
-  const showHeartPrompt = room?.pendingHeartPlayerId === socketId;
+  const showHeartPrompt = (room?.pendingHeartPlayerIds ?? []).includes(socketId);
 
   const handleCreateRoom = () => {
     if (!name.trim()) {
@@ -642,33 +643,51 @@ function App() {
 
                   <div className="controls">
                     {gameStarted ? (
-                      <>
-                        <button
-                          className="button primary"
-                          onClick={handleRoll}
-                          disabled={!canRoll}
-                        >
-                          {isMyTurn ? "Roll" : "Waiting"}
-                        </button>
-                        <button
-                          className="button ghost"
-                          onClick={handleUseMultiplier}
-                          disabled={!canUseMultiplier}
-                        >
-                          Use 2x
-                        </button>
-                        <button
-                          className="button ghost"
-                          onClick={handleBank}
-                          disabled={!canBank}
-                        >
-                          Bank
-                        </button>
-                      </>
+                      me?.out ? (
+                        <div className="out-message">
+                          <p>You’re out!</p>
+                          {me?.outReason && (
+                            <span className="out-reason">
+                              {me.outReason
+                                .replace(`${me.name} rolled a 1.`, "You rolled a 1.")
+                                .replace(`${me.name} rolled a 1`, "You rolled a 1")}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            className="button primary no-glow"
+                            onClick={handleRoll}
+                            disabled={!canRoll}
+                          >
+                            {isMyTurn ? "Roll" : "Waiting"}
+                          </button>
+                          <div className="controls-row">
+                            <button
+                              className="button ghost"
+                              onClick={handleUseMultiplier}
+                              disabled={!canUseMultiplier}
+                            >
+                              Use 2x
+                            </button>
+                            <button
+                              className="button ghost"
+                              onClick={handleBank}
+                              disabled={!canBank}
+                            >
+                              Bank
+                            </button>
+                          </div>
+                        </>
+                      )
                     ) : (
                       <>
                         {isHost ? (
-                          <button className="button primary" onClick={handleStart}>
+                          <button
+                            className="button primary no-glow"
+                            onClick={handleStart}
+                          >
                             Start game
                           </button>
                         ) : (
@@ -678,15 +697,6 @@ function App() {
                     )}
                   </div>
 
-                  {me &&
-                    !me.eligible &&
-                    gameStarted &&
-                    !gameFinished &&
-                    !roundEnded && (
-                      <p className="note">
-                        You joined mid-round. You’ll be eligible next round.
-                      </p>
-                    )}
                   {error && <p className="error">{error}</p>}
                 </div>
               </div>
@@ -717,18 +727,18 @@ function App() {
                             <span className="score-value">
                               {formatPot(player.score)}
                             </span>
-                            {isHost && player.id !== room.hostId && (
-                              <button
-                                className="kick-button"
-                                type="button"
-                                onClick={() =>
-                                  handleKickPlayer(player.id, player.name)
-                                }
-                              >
-                                Kick
-                              </button>
-                            )}
                           </div>
+                          {isHost && player.id !== room.hostId && (
+                            <button
+                              className="kick-button under-score"
+                              type="button"
+                              onClick={() =>
+                                handleKickPlayer(player.id, player.name)
+                              }
+                            >
+                              Kick
+                            </button>
+                          )}
                         </div>
                         <div className="player-divider" />
                         <div className="player-subrow">
@@ -754,10 +764,15 @@ function App() {
                             {gameStarted && isCurrent && !player.banked && (
                               <span className="player-status">Rolling</span>
                             )}
-                            {gameStarted && player.banked && (
-                              <span className="player-status banked">
-                                Banked
-                              </span>
+                            {gameStarted && player.out ? (
+                              <span className="player-status out">Out</span>
+                            ) : (
+                              gameStarted &&
+                              player.banked && (
+                                <span className="player-status banked">
+                                  Banked
+                                </span>
+                              )
                             )}
                           </div>
                         </div>
@@ -775,7 +790,7 @@ function App() {
                   <ul className="round-history">
                     {(showAllHistory
                       ? me.roundHistory
-                      : me.roundHistory.slice(0, 3)
+                      : me.roundHistory.slice(0, 2)
                     ).map((entry) => (
                       <li key={entry.id} className="round-history-item">
                         <div className="round-history-header">
@@ -878,7 +893,7 @@ function App() {
               </p>
               <div className="modal-actions">
                 <button
-                  className="button primary"
+                  className="button primary no-glow"
                   onClick={() => handleHeartDecision(true)}
                 >
                   Use heart
@@ -922,13 +937,13 @@ function App() {
           </div>
         </div>
       )}
-      {gameStarted && !gameFinished && roundEnded && (
+      {showIntermission && (
         <div className="modal-scrim intermission-scrim">
           <div className="modal intermission">
             <div className="intermission-banner">
               <p className="label">Round {room.currentRound} complete</p>
               <h2 className="intermission-reason">
-                {room.lastEvent?.includes("busted on a 1")
+                {room.lastRoundEndReason === "bust"
                   ? `${
                       room.players.find(
                         (player) => player.id === room.lastRollPlayerId
@@ -981,7 +996,7 @@ function App() {
               })}
             </div>
             <button
-              className="button primary intermission-ready"
+              className="button primary no-glow intermission-ready"
               onClick={handleReady}
               disabled={me?.readyForNextRound}
             >
@@ -1021,19 +1036,28 @@ function App() {
                 <div className="intermission-players-title">
                   <p className="label">Players</p>
                 </div>
-                <p className="note">
-                  {
-                    room.players.filter(
-                      (player) => player.readyForNextRound
-                    ).length
-                  }
-                  /{room.players.length} ready
-                </p>
+                {(() => {
+                  const waitingPlayers = roundEnded
+                    ? room.players.filter((player) => player.connected)
+                    : room.players.filter(
+                        (player) => !player.eligible || player.banked
+                      );
+                  const readyCount = waitingPlayers.filter(
+                    (player) => player.readyForNextRound
+                  ).length;
+                  return (
+                    <p className="note">
+                      {readyCount}/{waitingPlayers.length} ready
+                    </p>
+                  );
+                })()}
               </div>
               <ul className="intermission-list">
                 {room.players.map((player) => {
                   const isReady = Boolean(player.readyForNextRound);
                   const isSelf = player.id === socketId;
+                  const isInGame =
+                    !roundEnded && player.eligible && !player.banked;
                   return (
                     <li
                       key={`intermission-${player.id}`}
@@ -1065,13 +1089,19 @@ function App() {
                             Kick
                           </button>
                         )}
-                        <span
-                          className={`intermission-player-status ${
-                            isReady ? "ready" : "waiting"
-                          }`}
-                        >
-                          {isReady ? "Ready" : "Waiting"}
-                        </span>
+                        {isInGame ? (
+                          <span className="intermission-player-status ingame">
+                            In Game
+                          </span>
+                        ) : (
+                          <span
+                            className={`intermission-player-status ${
+                              isReady ? "ready" : "waiting"
+                            }`}
+                          >
+                            {isReady ? "Ready" : "Waiting"}
+                          </span>
+                        )}
                       </div>
                     </li>
                   );
