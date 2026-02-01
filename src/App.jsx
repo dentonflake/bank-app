@@ -97,11 +97,11 @@ function App() {
   const [room, setRoom] = useState(null);
   const [name, setName] = useState("");
   const [roomCode, setRoomCode] = useState("");
-  const [roundsInput, setRoundsInput] = useState(10);
-  const [heartPrice, setHeartPrice] = useState(100);
-  const [heartMax, setHeartMax] = useState(3);
-  const [multiplierPrice, setMultiplierPrice] = useState(250);
-  const [multiplierMax, setMultiplierMax] = useState(1);
+  const [roundsInput, setRoundsInput] = useState("10");
+  const [heartPrice, setHeartPrice] = useState("100");
+  const [heartMax, setHeartMax] = useState("3");
+  const [multiplierPrice, setMultiplierPrice] = useState("250");
+  const [multiplierMax, setMultiplierMax] = useState("1");
   const [homeMode, setHomeMode] = useState(null);
   const [error, setError] = useState("");
   const [rollModal, setRollModal] = useState(null);
@@ -244,6 +244,12 @@ function App() {
     lastFinishedRef.current = finished;
   }, [room]);
 
+  useEffect(() => {
+    if (room) {
+      setError("");
+    }
+  }, [room]);
+
 
   useEffect(() => {
     if (!room || !socketId) {
@@ -296,20 +302,45 @@ function App() {
     (me?.multiplierCount ?? 0) > 0;
   const showHeartPrompt = (room?.pendingHeartPlayerIds ?? []).includes(socketId);
 
+  const clampNumber = (value, min, max, fallback) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) {
+      return fallback;
+    }
+    return Math.min(max, Math.max(min, num));
+  };
+
+  const normalizeNumberInput = (value, min, max, fallback) => {
+    if (value === "") {
+      return String(fallback);
+    }
+    return String(clampNumber(value, min, max, fallback));
+  };
+
   const handleCreateRoom = () => {
     if (!name.trim()) {
       setError(emptyNameMessage);
       return;
     }
+    const totalRounds = clampNumber(roundsInput, 1, 50, 10);
+    const nextHeartPrice = clampNumber(heartPrice, 1, 10000, 100);
+    const nextHeartMax = clampNumber(heartMax, 1, 3, 3);
+    const nextMultiplierPrice = clampNumber(multiplierPrice, 1, 10000, 250);
+    const nextMultiplierMax = clampNumber(multiplierMax, 1, 3, 1);
     socket.emit("room:create", {
       name: name.trim(),
-      totalRounds: roundsInput,
+      totalRounds,
       token: playerToken,
-      heartPrice,
-      heartMax,
-      multiplierPrice,
-      multiplierMax,
+      heartPrice: nextHeartPrice,
+      heartMax: nextHeartMax,
+      multiplierPrice: nextMultiplierPrice,
+      multiplierMax: nextMultiplierMax,
     });
+    setRoundsInput(normalizeNumberInput(roundsInput, 1, 50, 10));
+    setHeartPrice(normalizeNumberInput(heartPrice, 1, 10000, 100));
+    setHeartMax(normalizeNumberInput(heartMax, 1, 3, 3));
+    setMultiplierPrice(normalizeNumberInput(multiplierPrice, 1, 10000, 250));
+    setMultiplierMax(normalizeNumberInput(multiplierMax, 1, 3, 1));
   };
 
   const handleJoinRoom = () => {
@@ -445,7 +476,13 @@ function App() {
                     <input
                       type="text"
                       value={name}
-                      onChange={(event) => setName(event.target.value)}
+                      onChange={(event) => {
+                        const nextName = event.target.value;
+                        setName(nextName);
+                        if (error === emptyNameMessage && nextName.trim()) {
+                          setError("");
+                        }
+                      }}
                       placeholder="Dice Boss"
                       maxLength={18}
                     />
@@ -459,8 +496,11 @@ function App() {
                           min={1}
                           max={50}
                           value={roundsInput}
-                          onChange={(event) =>
-                            setRoundsInput(Number(event.target.value))
+                          onChange={(event) => setRoundsInput(event.target.value)}
+                          onBlur={() =>
+                            setRoundsInput(
+                              normalizeNumberInput(roundsInput, 1, 50, 10)
+                            )
                           }
                         />
                       </label>
@@ -471,8 +511,11 @@ function App() {
                           min={1}
                           max={10000}
                           value={heartPrice}
-                          onChange={(event) =>
-                            setHeartPrice(Number(event.target.value))
+                          onChange={(event) => setHeartPrice(event.target.value)}
+                          onBlur={() =>
+                            setHeartPrice(
+                              normalizeNumberInput(heartPrice, 1, 10000, 100)
+                            )
                           }
                         />
                       </label>
@@ -483,8 +526,11 @@ function App() {
                           min={1}
                           max={3}
                           value={heartMax}
-                          onChange={(event) =>
-                            setHeartMax(Number(event.target.value))
+                          onChange={(event) => setHeartMax(event.target.value)}
+                          onBlur={() =>
+                            setHeartMax(
+                              normalizeNumberInput(heartMax, 1, 3, 3)
+                            )
                           }
                         />
                       </label>
@@ -496,7 +542,17 @@ function App() {
                           max={10000}
                           value={multiplierPrice}
                           onChange={(event) =>
-                            setMultiplierPrice(Number(event.target.value))
+                            setMultiplierPrice(event.target.value)
+                          }
+                          onBlur={() =>
+                            setMultiplierPrice(
+                              normalizeNumberInput(
+                                multiplierPrice,
+                                1,
+                                10000,
+                                250
+                              )
+                            )
                           }
                         />
                       </label>
@@ -508,7 +564,12 @@ function App() {
                           max={3}
                           value={multiplierMax}
                           onChange={(event) =>
-                            setMultiplierMax(Number(event.target.value))
+                            setMultiplierMax(event.target.value)
+                          }
+                          onBlur={() =>
+                            setMultiplierMax(
+                              normalizeNumberInput(multiplierMax, 1, 3, 1)
+                            )
                           }
                         />
                       </label>
